@@ -92,7 +92,7 @@ def get_course_data_by_nos_bridge(course_nos: list):
     if not course_nos:
         return []
 
-    # ปรับให้เป็น list ของ integer เพื่อความชัวร์ในการ Query
+    # clean input
     clean_course_nos = []
     for x in course_nos:
         try:
@@ -103,10 +103,11 @@ def get_course_data_by_nos_bridge(course_nos: list):
     if not clean_course_nos:
         return []
 
-    # ใช้ ? แทน %s ตามฟังก์ชันแรกที่ทำงานได้
     placeholders = ",".join(["?"] * len(clean_course_nos))
 
-    # 1) ดึงข้อมูล course
+    # ---------------------------
+    # 1) ดึง course
+    # ---------------------------
     sql_course = f"""
         SELECT OCourse_no, course, script
         FROM ai_data_sl
@@ -114,14 +115,26 @@ def get_course_data_by_nos_bridge(course_nos: list):
     """
     course_rows = run_query_bridge(sql_course, clean_course_nos)
 
-    # ตรวจสอบข้อผิดพลาดจาก SQL (หากมี "error")
-    if not course_rows or (isinstance(course_rows, list) and len(course_rows) > 0 and "error" in course_rows[0]):
+    if not course_rows or (isinstance(course_rows, list) and "error" in course_rows[0]):
         return []
 
-    # แปลงข้อมูลให้เป็น list of tuples (เพื่อให้กระทบโค้ดส่วนอื่นน้อยที่สุด)
-    course_data = [(r['script'], r['course']) for r in course_rows]
-    
-    # 2) ดึงข้อมูลวิดีโอ
+    # 🔥 ใช้ dict เป็นหลัก (เลิก tuple)
+    course_map = {}
+    for r in course_rows:
+        if not isinstance(r, dict):
+            continue
+
+        c_no = int(r["OCourse_no"])
+        course_map[c_no] = {
+            "course_no": c_no,
+            "course": r.get("course"),
+            "script": r.get("script"),
+            "videos": []
+        }
+
+    # ---------------------------
+    # 2) ดึง video
+    # ---------------------------
     sql_vdo = f"""
         SELECT Video_OCourse_no, Video_part, Video_name, Embed_youtube
         FROM course_online_vdo
@@ -132,26 +145,37 @@ def get_course_data_by_nos_bridge(course_nos: list):
     """
     video_rows = run_query_bridge(sql_vdo, clean_course_nos)
 
-    # ถ้ามีวิดีโอ ให้เพิ่มข้อมูลใน course_data
-    if video_rows and not (isinstance(video_rows, list) and len(video_rows) > 0 and "error" in video_rows[0]):
-        # สร้าง map สำหรับการแปลงข้อมูล video
-        video_map = {}
+    if video_rows and not (isinstance(video_rows, list) and "error" in video_rows[0]):
+
+        # 🔥 กัน tuple ตรงนี้
+        columns = ["Video_OCourse_no", "Video_part", "Video_name", "Embed_youtube"]
+
         for v in video_rows:
-            v_c_no = int(v["Video_OCourse_no"])
-            if v_c_no not in video_map:
-                video_map[v_c_no] = []
-            video_map[v_c_no].append({
+            if isinstance(v, tuple):
+                v = dict(zip(columns, v))
+            elif not isinstance(v, dict):
+                continue
+
+            try:
+                v_c_no = int(v.get("Video_OCourse_no"))
+            except:
+                continue
+
+            if v_c_no not in course_map:
+                continue
+
+            course_map[v_c_no]["videos"].append({
                 "video_part": v.get("Video_part"),
                 "video_name": v.get("Video_name") or "",
                 "video_url": v.get("Embed_youtube") or "",
             })
 
-        # รวมข้อมูลวิดีโอลงใน course_data
-        for idx, (script, course) in enumerate(course_data):
-            # หาว่าหลักสูตรไหนมีวิดีโอที่ตรงกับ course_no
-            course_no = clean_course_nos[idx]
-            if course_no in video_map:
-                course_data[idx] = (*course_data[idx], video_map[course_no])
+    # ---------------------------
+    # 3) คืนค่า (เรียงตาม input เดิม)
+    # ---------------------------
+    result = []
+    for c_no in clean_course_nos:
+        if c_no in course_map:
+            result.append(course_map[c_no])
 
-    # คืนค่าเป็นข้อมูลตามลำดับ
-    return course_data
+    return result
