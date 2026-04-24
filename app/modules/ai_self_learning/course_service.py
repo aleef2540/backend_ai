@@ -17,19 +17,18 @@ from app.core.database import run_query_bridge # import ฟังก์ชัน
 #     return rows
 
 def get_course_data_by_no_bridge(course_no: int):
-    # ใช้ SQL เดิม แต่เปลี่ยน %s เป็น ? (สำหรับ PHP mysqli prepare)
+    # เปลี่ยน %s เป็น ?
     sql = """
-        SELECT
-            script,
-            course
+        SELECT script, course
         FROM ai_data_sl
         WHERE OCourse_no = ?
     """
-    # เรียกผ่าน Bridge แทนการใช้ cursor
     rows = run_query_bridge(sql, [course_no])
     
-    # แปลงรูปแบบผลลัพธ์ให้เหมือน fetchall() ของเดิม (ที่เป็น list of tuples) 
-    # เพื่อให้โค้ดส่วนอื่นไม่ต้องแก้ไข
+    # แปลงข้อมูลกลับเป็น list of tuples เพื่อให้กระทบ code ส่วนอื่นน้อยที่สุด
     if rows and isinstance(rows, list):
+        if len(rows) > 0 and "error" in rows[0]:
+            print(f"SQL Error: {rows[0]['error']}")
+            return []
         return [(r['script'], r['course']) for r in rows]
     return []

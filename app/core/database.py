@@ -1,5 +1,6 @@
 import json
 import requests
+import base64 # เพิ่ม import base64
 import mysql.connector
 from typing import Optional
 
@@ -18,22 +19,25 @@ def get_mysql_connection():
     )
 
 def run_query_bridge(sql: str, params: list = None):
-    """
-    ฟังก์ชันใหม่สำหรับรัน SQL ผ่าน PHP API Bridge 
-    เพื่อแก้ปัญหา IP บน Railway เปลี่ยนบ่อย
-    """
+    # --- แก้ไขตรงนี้: Encode SQL string เป็น base64 ---
+    sql_encoded = base64.b64encode(sql.encode('utf-8')).decode('utf-8')
+    
     payload = {
         'key': BRIDGE_KEY,
-        'query': sql,
+        'query': sql_encoded, # ส่งตัวที่ encode แล้วไป
         'params': json.dumps(params) if params else json.dumps([])
     }
     
     try:
-        response = requests.post(PHP_BRIDGE_URL, data=payload)
+        # กำหนด Timeout เพื่อไม่ให้แอปค้างถ้า Host ช้า
+        response = requests.post(PHP_BRIDGE_URL, data=payload, timeout=10)
         response.raise_for_status()
         return response.json()
     except Exception as e:
         print(f"Bridge Connection Error: {e}")
+        # ถ้ามี response ลองพิมพ์ออกมาดูว่า Host ตอบว่าอะไร
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response Content: {e.response.text}")
         return None
 
 
