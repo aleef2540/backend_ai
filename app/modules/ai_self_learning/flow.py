@@ -13,14 +13,14 @@ from app.modules.ai_self_learning.schema import ChatState_aiselflearning
 import json
 
 
-async def process_chat_aiselflearning(req, state, conn):
+async def process_chat_aiselflearning(req, state):
     if state is None:
         state = ChatState_aiselflearning()
 
     user_message = req.user_message.strip()
     course_no = req.OCourse_no
 
-    course_data = get_course_data_by_no_bridge(conn, course_no)
+    course_data = get_course_data_by_no_bridge(course_no)
 
     if not course_data:
         reply = "ขออภัยครับ ไม่พบข้อมูลหลักสูตรนี้"
@@ -114,14 +114,14 @@ async def process_chat_aiselflearning(req, state, conn):
     "source": "ai_self_learning",
 })()
 
-async def process_chat_aiselflearning_stream(req, state, conn):
+async def process_chat_aiselflearning_stream(req, state):
     if state is None:
         state = ChatState_aiselflearning()
 
     user_message = req.user_message.strip()
     course_no = req.OCourse_no
 
-    course_data = get_course_data_by_no_bridge(conn, course_no)
+    course_data = get_course_data_by_no_bridge(course_no)
 
     if not course_data:
         reply = "ขออภัยครับ ไม่พบข้อมูลหลักสูตรนี้"
