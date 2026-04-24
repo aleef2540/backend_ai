@@ -35,6 +35,8 @@ def run_query_bridge(sql: str, params: list = None):
     except Exception as e:
         print(f"Bridge Connection Error: {e}")
         return None
+    
+
 
 
 # def ensure_chat_session(

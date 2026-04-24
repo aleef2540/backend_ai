@@ -91,13 +91,20 @@ def get_course_data_by_nos_bridge(course_nos: list[str]):
     if not course_nos:
         return []
 
-    clean_course_nos = [str(x).strip() for x in course_nos if str(x).strip()]
+    clean_course_nos = []
+    for x in course_nos:
+        x = str(x).strip()
+        if x:
+            clean_course_nos.append(x)
+
     if not clean_course_nos:
         return []
 
     placeholders = ",".join(["%s"] * len(clean_course_nos))
 
-    # 1) ดึงข้อมูล course
+    # ---------------------------------
+    # 1) ดึงข้อมูล course ก่อน
+    # ---------------------------------
     sql_course = f"""
         SELECT
             OCourse_no,
@@ -107,11 +114,11 @@ def get_course_data_by_nos_bridge(course_nos: list[str]):
         WHERE OCourse_no IN ({placeholders})
     """
     course_rows = run_query_bridge(sql_course, clean_course_nos)
-
+    
     if not course_rows:
         return []
 
-    # ทำ map เก็บ course
+    # ทำ map เก็บ course ไว้ก่อน
     course_map = {}
     for row in course_rows:
         course_no = int(row["OCourse_no"])
@@ -122,7 +129,9 @@ def get_course_data_by_nos_bridge(course_nos: list[str]):
             "videos": []
         }
 
-    # 2) ดึงวิดีโอ
+    # ---------------------------------
+    # 2) ดึงวิดีโอของทุก course อีกรอบ
+    # ---------------------------------
     sql_vdo = f"""
         SELECT
             Video_OCourse_no,
@@ -137,17 +146,20 @@ def get_course_data_by_nos_bridge(course_nos: list[str]):
     """
     video_rows = run_query_bridge(sql_vdo, clean_course_nos)
 
-    if video_rows:
-        for v in video_rows:
-            course_no = int(v["Video_OCourse_no"])
-            if course_no in course_map:
-                course_map[course_no]["videos"].append({
-                    "video_part": v.get("Video_part"),
-                    "video_name": v.get("Video_name") or "",
-                    "video_url": v.get("Embed_youtube") or "",
-                })
+    # เอา videos ไปยัดกลับเข้า course_map
+    for v in video_rows:
+        course_no = int(v["Video_OCourse_no"])
 
-    # 3) คืนค่าตามลำดับเดิม
+        if course_no in course_map:
+            course_map[course_no]["videos"].append({
+                "video_part": v.get("Video_part"),
+                "video_name": v.get("Video_name") or "",
+                "video_url": v.get("Embed_youtube") or "",
+            })
+
+    # ---------------------------------
+    # 3) คืนค่าตามลำดับ course_nos เดิม
+    # ---------------------------------
     result = []
     for cno in clean_course_nos:
         cno_int = int(cno)
