@@ -87,6 +87,7 @@ def get_course_data_by_nos(conn, course_nos: list[str]):
 
     return result
 
+
 def get_course_data_by_nos_bridge(course_nos: list):
     if not course_nos:
         return []
@@ -112,22 +113,15 @@ def get_course_data_by_nos_bridge(course_nos: list):
         WHERE OCourse_no IN ({placeholders})
     """
     course_rows = run_query_bridge(sql_course, clean_course_nos)
-    
-    # เช็ค Error แบบเดียวกับฟังก์ชันแรก
+
+    # ตรวจสอบข้อผิดพลาดจาก SQL (หากมี "error")
     if not course_rows or (isinstance(course_rows, list) and len(course_rows) > 0 and "error" in course_rows[0]):
         return []
 
-    course_map = {}
-    for row in course_rows:
-        c_no = int(row["OCourse_no"])
-        course_map[c_no] = {
-            "course_no": c_no,
-            "course_name": row.get("course") or "",
-            "script": row.get("script") or "",
-            "videos": []
-        }
-
-    # 2) ดึงวิดีโอ
+    # แปลงข้อมูลให้เป็น list of tuples (เพื่อให้กระทบโค้ดส่วนอื่นน้อยที่สุด)
+    course_data = [(r['script'], r['course']) for r in course_rows]
+    
+    # 2) ดึงข้อมูลวิดีโอ
     sql_vdo = f"""
         SELECT Video_OCourse_no, Video_part, Video_name, Embed_youtube
         FROM course_online_vdo
@@ -138,20 +132,26 @@ def get_course_data_by_nos_bridge(course_nos: list):
     """
     video_rows = run_query_bridge(sql_vdo, clean_course_nos)
 
+    # ถ้ามีวิดีโอ ให้เพิ่มข้อมูลใน course_data
     if video_rows and not (isinstance(video_rows, list) and len(video_rows) > 0 and "error" in video_rows[0]):
+        # สร้าง map สำหรับการแปลงข้อมูล video
+        video_map = {}
         for v in video_rows:
             v_c_no = int(v["Video_OCourse_no"])
-            if v_c_no in course_map:
-                course_map[v_c_no]["videos"].append({
-                    "video_part": v.get("Video_part"),
-                    "video_name": v.get("Video_name") or "",
-                    "video_url": v.get("Embed_youtube") or "",
-                })
+            if v_c_no not in video_map:
+                video_map[v_c_no] = []
+            video_map[v_c_no].append({
+                "video_part": v.get("Video_part"),
+                "video_name": v.get("Video_name") or "",
+                "video_url": v.get("Embed_youtube") or "",
+            })
 
-    # 3) คืนค่าตามลำดับ
-    result = []
-    for cno in clean_course_nos:
-        if cno in course_map:
-            result.append(course_map[cno])
+        # รวมข้อมูลวิดีโอลงใน course_data
+        for idx, (script, course) in enumerate(course_data):
+            # หาว่าหลักสูตรไหนมีวิดีโอที่ตรงกับ course_no
+            course_no = clean_course_nos[idx]
+            if course_no in video_map:
+                course_data[idx] = (*course_data[idx], video_map[course_no])
 
-    return result
+    # คืนค่าเป็นข้อมูลตามลำดับ
+    return course_data
