@@ -6,7 +6,7 @@ from typing import Optional
 
 # from app.schemas_aiweb import ChatState_aiweb
 # URL ของ PHP Bridge (เปลี่ยนเป็น IP ของเครื่อง XAMPP หรือ URL ของ ngrok)
-PHP_BRIDGE_URL = "http://www.entraining.net/2018/api_bridge.php"
+PHP_BRIDGE_URL = "https://www.entraining.net/2018/api_bridge.php"
 BRIDGE_KEY = "1234"
 
 def get_mysql_connection():
