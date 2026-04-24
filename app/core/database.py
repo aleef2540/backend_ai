@@ -115,19 +115,19 @@ def run_query_bridge(sql: str, params: list = None):
 #     cur.close()
 
 # def reset_chat_state(conn, chat_id: str):
-    sql1 = """
-        UPDATE chat_sessions
-        SET state_json = %s,
-            updated_at = NOW()
-        WHERE chat_id = %s
-    """
-    sql2 = "DELETE FROM chat_messages WHERE chat_id = %s"
+    # sql1 = """
+    #     UPDATE chat_sessions
+    #     SET state_json = %s,
+    #         updated_at = NOW()
+    #     WHERE chat_id = %s
+    # """
+    # sql2 = "DELETE FROM chat_messages WHERE chat_id = %s"
 
-    cur = conn.cursor()
-    cur.execute(
-        sql1,
-        (json.dumps(ChatState_aiweb().model_dump(), ensure_ascii=False), chat_id),
-    )
-    cur.execute(sql2, (chat_id,))
-    conn.commit()
-    cur.close()
+    # cur = conn.cursor()
+    # cur.execute(
+    #     sql1,
+    #     (json.dumps(ChatState_aiweb().model_dump(), ensure_ascii=False), chat_id),
+    # )
+    # cur.execute(sql2, (chat_id,))
+    # conn.commit()
+    # cur.close()
