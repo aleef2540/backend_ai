@@ -162,7 +162,7 @@ def get_course_data_by_nos_bridge(course_nos: list):
 
         course_map[c_no] = {
             "course_no": c_no,
-            "course": r.get("course"),
+            "course_name": r.get("course"),
             "script": r.get("script"),
             "videos": []
         }
