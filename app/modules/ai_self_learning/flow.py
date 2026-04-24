@@ -1,4 +1,5 @@
-from app.modules.ai_self_learning.course_service import get_course_data_by_no
+from app.modules.ai_self_learning.course_service import  get_course_data_by_no_bridge
+# get_course_data_by_no,
 
 # shared layer (ตัวนี้ใช้ร่วม)
 from app.shared.ai.openai_client import (
@@ -19,7 +20,7 @@ async def process_chat_aiselflearning(req, state, conn):
     user_message = req.user_message.strip()
     course_no = req.OCourse_no
 
-    course_data = get_course_data_by_no(conn, course_no)
+    course_data = get_course_data_by_no_bridge(conn, course_no)
 
     if not course_data:
         reply = "ขออภัยครับ ไม่พบข้อมูลหลักสูตรนี้"
@@ -120,7 +121,7 @@ async def process_chat_aiselflearning_stream(req, state, conn):
     user_message = req.user_message.strip()
     course_no = req.OCourse_no
 
-    course_data = get_course_data_by_no(conn, course_no)
+    course_data = get_course_data_by_no_bridge(conn, course_no)
 
     if not course_data:
         reply = "ขออภัยครับ ไม่พบข้อมูลหลักสูตรนี้"

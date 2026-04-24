@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 import json
 import time
 
-from app.core.database import get_mysql_connection
+# from app.core.database import get_mysql_connection
 from app.utils.debug_state import print_debug, print_state
 
 from app.modules.ai_self_learning.schema import ChatRequest_aiselflearning
@@ -25,7 +25,7 @@ async def chat_ai_self_learning_stream(req: ChatRequest_aiselflearning):
 
     user_message = req.user_message.strip()
     req.user_message = user_message
-    conn_mysql = get_mysql_connection()
+    # conn_mysql = get_mysql_connection()
 
     if req.state:
         state = req.state
@@ -44,7 +44,7 @@ async def chat_ai_self_learning_stream(req: ChatRequest_aiselflearning):
         final_source = "ai_self_learning"
 
         try:
-            async for item in process_chat_aiselflearning_stream(req, state, conn_mysql):
+            async for item in process_chat_aiselflearning_stream(req, state):
                 item_type = item.get("type")
 
                 if item_type == "chunk":
@@ -64,15 +64,15 @@ async def chat_ai_self_learning_stream(req: ChatRequest_aiselflearning):
                     final_reason = item.get("reason", "")
                     final_state = item.get("state", final_state)
 
-                    insert_chat_history_aiselflearning(
-                        conn=conn_mysql,
-                        chat_id=req.chat_id,
-                        course_no=req.OCourse_no,
-                        user_message=req.user_message,
-                        ai_reply=final_reply,
-                        ai_status=final_status,
-                        ai_reason=final_reason,
-                    )
+                    # insert_chat_history_aiselflearning(
+                    #     conn=conn_mysql,
+                    #     chat_id=req.chat_id,
+                    #     course_no=req.OCourse_no,
+                    #     user_message=req.user_message,
+                    #     ai_reply=final_reply,
+                    #     ai_status=final_status,
+                    #     ai_reason=final_reason,
+                    # )
 
                     chat_state_store_aiselflearning.set_state(req.chat_id, final_state)
 
@@ -98,11 +98,11 @@ async def chat_ai_self_learning_stream(req: ChatRequest_aiselflearning):
 
             yield f"data: {payload}\n\n"
 
-        finally:
-            try:
-                conn_mysql.close()
-            except Exception:
-                pass
+        # finally:
+        #     try:
+        #         conn_mysql.close()
+        #     except Exception:
+        #         pass
 
     return StreamingResponse(
         event_generator(),

@@ -1,18 +1,40 @@
 import json
-import mysql.connector
+import requests
+# import mysql.connector
 from typing import Optional
 
 # from app.schemas_aiweb import ChatState_aiweb
+# URL ของ PHP Bridge (เปลี่ยนเป็น IP ของเครื่อง XAMPP หรือ URL ของ ngrok)
+PHP_BRIDGE_URL = "https://www.entraining.net/2018/api_bridge.php"
+BRIDGE_KEY = "1234"
 
+# def get_mysql_connection():
+#     return mysql.connector.connect(
+#         host="entstaffs.entraining.net",
+#         user="entraini1_entrain",
+#         password="Ent.Pw78x.@a27df!z88",
+#         database="entraini1_entrainingdb",
+#         charset="utf8mb4",
+#     )
 
-def get_mysql_connection():
-    return mysql.connector.connect(
-        host="entstaffs.entraining.net",
-        user="entraini1_entrain",
-        password="Ent.Pw78x.@a27df!z88",
-        database="entraini1_entrainingdb",
-        charset="utf8mb4",
-    )
+def run_query_bridge(sql: str, params: list = None):
+    """
+    ฟังก์ชันใหม่สำหรับรัน SQL ผ่าน PHP API Bridge 
+    เพื่อแก้ปัญหา IP บน Railway เปลี่ยนบ่อย
+    """
+    payload = {
+        'key': BRIDGE_KEY,
+        'query': sql,
+        'params': json.dumps(params) if params else json.dumps([])
+    }
+    
+    try:
+        response = requests.post(PHP_BRIDGE_URL, data=payload)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Bridge Connection Error: {e}")
+        return None
 
 
 # def ensure_chat_session(
