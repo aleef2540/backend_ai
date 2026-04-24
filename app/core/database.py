@@ -1,12 +1,12 @@
 import json
-import requests
+import cloudscraper
 import base64 # เพิ่ม import base64
 import mysql.connector
 from typing import Optional
 
 # from app.schemas_aiweb import ChatState_aiweb
 # URL ของ PHP Bridge (เปลี่ยนเป็น IP ของเครื่อง XAMPP หรือ URL ของ ngrok)
-PHP_BRIDGE_URL = "http://84.247.149.47/2018/api_bridge.php"
+PHP_BRIDGE_URL = "http://www.entraining.net/2018/api_bridge.php"
 BRIDGE_KEY = "1234"
 
 def get_mysql_connection():
@@ -19,25 +19,21 @@ def get_mysql_connection():
     )
 
 def run_query_bridge(sql: str, params: list = None):
-    # --- แก้ไขตรงนี้: Encode SQL string เป็น base64 ---
     sql_encoded = base64.b64encode(sql.encode('utf-8')).decode('utf-8')
-    
     payload = {
         'key': BRIDGE_KEY,
-        'query': sql_encoded, # ส่งตัวที่ encode แล้วไป
+        'query': sql_encoded,
         'params': json.dumps(params) if params else json.dumps([])
     }
     
     try:
-        # กำหนด Timeout เพื่อไม่ให้แอปค้างถ้า Host ช้า
-        response = requests.post(PHP_BRIDGE_URL, data=payload, timeout=10)
+        # ใช้ cloudscraper สร้าง session แทน requests ปกติ
+        scraper = cloudscraper.create_scraper() 
+        response = scraper.post(PHP_BRIDGE_URL, data=payload, timeout=15)
         response.raise_for_status()
         return response.json()
     except Exception as e:
         print(f"Bridge Connection Error: {e}")
-        # ถ้ามี response ลองพิมพ์ออกมาดูว่า Host ตอบว่าอะไร
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"Response Content: {e.response.text}")
         return None
 
 
