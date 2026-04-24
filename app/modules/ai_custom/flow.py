@@ -1,4 +1,4 @@
-from app.modules.ai_custom.course_service import get_course_data_by_nos_bridge
+from app.modules.ai_custom.course_service import get_course_data_by_nos
 from app.modules.ai_custom.service import (
     detect_intent,
     reply_greeting,
@@ -185,7 +185,7 @@ def build_summary_message(user_message: str, state) -> str:
     )
 
 
-async def process_chat_aicustom(req, state):
+async def process_chat_aicustom(req, state, conn):
     if state is None:
         state = ChatState_aicustom()
 
@@ -215,7 +215,7 @@ async def process_chat_aicustom(req, state):
             "active_video": None,
         })()
 
-    course_data = get_course_data_by_nos_bridge(course_use)
+    course_data = get_course_data_by_nos(conn, course_use)
     course_context = build_course_name_context(course_data)
 
     state.last_user_message = user_message
@@ -677,7 +677,7 @@ async def process_chat_aicustom(req, state):
         "active_video": active_video,
     })()
 
-async def process_chat_aicustom_stream(req, state):
+async def process_chat_aicustom_stream(req, state, conn):
     if state is None:
         state = ChatState_aicustom()
 
@@ -710,7 +710,7 @@ async def process_chat_aicustom_stream(req, state):
         }
         return
 
-    course_data = get_course_data_by_nos_bridge(course_use)
+    course_data = get_course_data_by_nos(conn, course_use)
     course_context = build_course_name_context(course_data)
 
     state.last_user_message = user_message

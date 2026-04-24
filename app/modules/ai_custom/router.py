@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 import json
 import time
 
-# from app.core.database import get_mysql_connection
+from app.core.database import get_mysql_connection
 from app.utils.debug_state import print_debug, print_state
 
 from app.modules.ai_custom.schema import ChatRequest_aicustom, ResetRequest_aicustom
@@ -19,7 +19,7 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
 
     user_message = req.user_message.strip()
     req.user_message = user_message
-    # conn_mysql = get_mysql_connection()
+    conn_mysql = get_mysql_connection()
 
     if req.state:
         state = req.state
@@ -48,7 +48,7 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
         print(f"[STREAM] generator START {stream_start:.3f}", flush=True)
 
         try:
-            async for item in process_chat_aicustom_stream(req, state):
+            async for item in process_chat_aicustom_stream(req, state, conn_mysql):
                 item_type = item.get("type")
 
                 if item_type == "chunk":
@@ -104,10 +104,10 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
                 flush=True
             )
 
-            # try:
-            #     conn_mysql.close()
-            # except Exception:
-            #     pass
+            try:
+                conn_mysql.close()
+            except Exception:
+                pass
 
     return StreamingResponse(
         event_generator(),
