@@ -1,6 +1,6 @@
 import json
 import requests
-# import mysql.connector
+import mysql.connector
 from typing import Optional
 
 # from app.schemas_aiweb import ChatState_aiweb
@@ -8,14 +8,14 @@ from typing import Optional
 PHP_BRIDGE_URL = "https://www.entraining.net/2018/api_bridge.php"
 BRIDGE_KEY = "1234"
 
-# def get_mysql_connection():
-#     return mysql.connector.connect(
-#         host="entstaffs.entraining.net",
-#         user="entraini1_entrain",
-#         password="Ent.Pw78x.@a27df!z88",
-#         database="entraini1_entrainingdb",
-#         charset="utf8mb4",
-#     )
+def get_mysql_connection():
+    return mysql.connector.connect(
+        host="entstaffs.entraining.net",
+        user="entraini1_entrain",
+        password="Ent.Pw78x.@a27df!z88",
+        database="entraini1_entrainingdb",
+        charset="utf8mb4",
+    )
 
 def run_query_bridge(sql: str, params: list = None):
     """
