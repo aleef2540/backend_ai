@@ -18,9 +18,12 @@ async def start_ai_coach_stream(req: ChatRequest_aicoach):
     if not req.user_message or not req.user_message.strip():
         raise HTTPException(status_code=400, detail="user_message is required")
 
+    step = 1
+    fixed_question = FIXED_QUESTIONS[step]
+
     state = ChatState(
-        phase = 1,
-        step = 0,
+        step=0,
+        fixed_question=fixed_question,
     )
 
     chat_state_store_aicoach.set_state(req.web_no, req.member_no, state)
@@ -41,7 +44,6 @@ async def start_ai_coach_stream(req: ChatRequest_aicoach):
             async for item in process_chat_aicoach_stream(req, state):
                 item_type = item.get("type")
 
-                # กำลัง response เป็น chunk
                 if item_type == "chunk":
                     text = item.get("text", "")
                     if text:
@@ -54,15 +56,12 @@ async def start_ai_coach_stream(req: ChatRequest_aicoach):
                     }, ensure_ascii=False)
                     yield f"data: {payload}\n\n"
 
-                # response เสร็จแล้ว 
                 elif item_type == "done":
                     final_reply = item.get("reply", final_reply) or final_reply
                     final_state = item.get("state", final_state) or final_state
                     final_source = item.get("source", final_source) or final_source
 
                     chat_state_store_aicoach.set_state(req.web_no, req.member_no, final_state)
-                    # state = chat_state_store_aicoach.get_state(req.web_no, req.member_no)
-                    print_state("AFTER STATE", chat_state_store_aicoach.get_state(req.web_no, req.member_no))
 
                     payload = json.dumps({
                         "type": "done",

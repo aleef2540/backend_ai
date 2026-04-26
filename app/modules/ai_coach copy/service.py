@@ -631,472 +631,60 @@ async def generate_next_step_question(
 # STREAM VERSION
 # ---------------------------------------------------
 
-import json
-import re
-
-
-async def evaluate_answer(
-    rule: dict,
-    user_answer: str,
-    state,
-    model: str = "gpt-4.1-mini",
-) -> dict:
-    """
-    ประเมินคำตอบของผู้ใช้ตาม rule ปัจจุบัน
-    พร้อมใช้ context จาก state.answers
-    """
-
-    text = (user_answer or "").strip()
-
-    # -----------------------------
-    # Basic checks
-    # -----------------------------
-    if not text:
-        return {
-            "ok": True,
-            "pass": False,
-            "status": "too_short",
-            "needs_followup": True,
-            "reason": "ผู้ใช้ยังไม่ได้ตอบคำถาม",
-            "confidence": 1.0,
-            "extracted": {},
-            "raw": "",
-        }
-
-    short_words = {
-        "ครับ", "ค่ะ", "คับ", "จ้า", "อือ", "อืม",
-        "โอเค", "ok", "yes", "ไม่รู้", "ไม่แน่ใจ", "เฉยๆ"
-    }
-
-    if text.lower() in short_words or len(text) <= 2:
-        return {
-            "ok": True,
-            "pass": False,
-            "status": "too_short",
-            "needs_followup": True,
-            "reason": "คำตอบสั้นเกินไป",
-            "confidence": 0.98,
-            "extracted": {},
-            "raw": "",
-        }
-
-    # -----------------------------
-    # Previous context
-    # -----------------------------
-    previous_answers = {}
-
-    try:
-        previous_answers = dict(state.answers)
-    except Exception:
-        previous_answers = {}
-
-    previous_context = json.dumps(
-        previous_answers,
-        ensure_ascii=False,
-        indent=2
-    )
-
-    # -----------------------------
-    # LLM Judge
-    # -----------------------------
-    system_prompt = """
-คุณคือระบบประเมินคำตอบของผู้ใช้สำหรับ AI Coach
-
-หน้าที่:
-ประเมินว่า user ตอบตรงกับเป้าหมายของคำถามหรือไม่
-โดยใช้ข้อมูลก่อนหน้าประกอบด้วย
-
-พิจารณา:
-1. ตรงประเด็นไหม
-2. มีข้อมูลพอให้ไปต่อไหม
-3. ยังต้องถามต่อไหม
-
-สถานะที่อนุญาต:
-- accepted
-- partial
-- off_topic
-- unclear
-- too_short
-
-กฎสำคัญ:
-- emotion: ถ้าบอกความรู้สึกชัด ถือว่าผ่านได้
-- topic: ต้องรู้ว่ากำลังพูดเรื่องอะไร
-- reason: ต้องมีเหตุผล
-- goal: ต้องมีสิ่งที่อยากได้
-- impact: ต้องมีผลกระทบ
-
-ตอบ JSON เท่านั้น
-
-{
-  "pass": true,
-  "status": "accepted",
-  "needs_followup": false,
-  "reason": "ตอบตรงประเด็น",
-  "confidence": 0.91,
-  "extracted_value": "..."
-}
-"""
-
-    user_prompt = f"""
-ข้อมูลก่อนหน้าจากผู้ใช้:
-{previous_context}
-
-คำถามปัจจุบัน:
-{rule.get("question", "")}
-
-เป้าหมาย:
-{rule.get("goal", "")}
-
-ประเภทคำตอบ:
-{rule.get("answer_type", "")}
-
-สิ่งที่ต้องการ:
-{", ".join(rule.get("required", []))}
-
-คำตอบล่าสุดของผู้ใช้:
-{text}
-"""
-
-    try:
-        result = await call_openai_chat_full(
-            model=model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=0.1,
-        )
-
-        raw = (result.get("content") or "").strip()
-        raw = re.sub(r"```json|```", "", raw).strip()
-
-        data = json.loads(raw) if raw else {}
-
-        allowed = {
-            "accepted",
-            "partial",
-            "off_topic",
-            "unclear",
-            "too_short",
-        }
-
-        status = str(data.get("status", "unclear")).strip()
-
-        if status not in allowed:
-            status = "unclear"
-
-        passed = bool(data.get("pass", False))
-
-        if status != "accepted":
-            passed = False
-
-        extracted_value = data.get("extracted_value", text)
-
-        return {
-            "ok": True,
-            "pass": passed,
-            "status": status,
-            "needs_followup": bool(data.get("needs_followup", not passed)),
-            "reason": str(data.get("reason", "")).strip(),
-            "confidence": float(data.get("confidence", 0.0)),
-            "extracted": {
-                rule.get("key", "answer"): extracted_value
-            },
-            "raw": raw,
-        }
-
-    except Exception as e:
-        return {
-            "ok": False,
-            "pass": False,
-            "status": "unclear",
-            "needs_followup": True,
-            "reason": f"parse_error: {str(e)}",
-            "confidence": 0.0,
-            "extracted": {},
-            "raw": "",
-        }
-
-async def ask(
-    state,
-    next_rule: dict,
-    model: str = "gpt-4.1-mini"
-):
-    """
-    ถามคำถามถัดไปแบบ stream (natural coaching style)
-    """
-
-    memory = dict(state.answers) if hasattr(state, "answers") else {}
-
-    context_lines = [f"- {k}: {v}" for k, v in memory.items()]
-    context_text = "\n".join(context_lines) if context_lines else "ไม่มี"
-
-    system_prompt = """
-คุณคือ AI Coach ที่กำลังสนทนาแบบธรรมชาติ ไม่ใช่แบบสอบถาม
-
-หน้าที่:
-- สร้างบทสนทนาที่ต่อเนื่องและเป็นมนุษย์
-- ต้องมี "การตอบรับความรู้สึก/สิ่งที่ผู้ใช้พูด" ก่อนถามคำถาม
-- ทำให้ผู้ใช้รู้สึกว่าถูกเข้าใจ ไม่ใช่ถูกสอบ
-
-โครงสร้างคำตอบ:
-1. สะท้อนสิ่งที่ผู้ใช้เล็กน้อย (acknowledge)
-2. เชื่อมเข้าบริบทของคำถามถัดไป (bridge)
-3. ถามคำถามเดียวที่เกี่ยวข้องกับประเด็นนั้น
-
-หลักการ:
-- ฟังดูเป็นคนคุยกันจริง
-- อบอุ่น เป็นมิตร
-- ไม่แข็ง
-- ไม่เหมือนฟอร์ม
-- 2-4 ประโยค
-- ประโยคสุดท้ายต้องเป็นคำถามเดียว
-
-ห้าม:
-- ห้ามถามหลายคำถาม
-- ห้ามเริ่มเหมือน checklist
-- ห้ามข้ามการสะท้อนความรู้สึก
-"""
-
-    user_prompt = f"""
-ข้อมูลก่อนหน้า:
-{context_text}
-
-คำถามถัดไป:
-{next_rule["question"]}
-
-เป้าหมาย:
-{next_rule["goal"]}
-
-ช่วยตอบแบบโค้ชที่ "ต่อบทสนทนา" ไม่ใช่ถามคำถามใหม่ทันที
-"""
-
-    async for item in _stream_text_response(
-        model=model,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        temperature=0.6,
-    ):
-        yield item
-
-
-
-async def ask_followup(
-    user_answer: str,
-    state,
-    rule: dict,
-    eval_result: dict,
-    model: str = "gpt-4.1-mini"
-):
-    """
-    ถาม follow-up แบบ stream (natural conversation style)
-    """
-
-    retry = getattr(state, "retry_count", 1)
-
-    memory = dict(state.answers) if hasattr(state, "answers") else {}
-
-    context_lines = [f"- {k}: {v}" for k, v in memory.items()]
-    context_text = "\n".join(context_lines) if context_lines else "ไม่มี"
-
-    system_prompt = """
-คุณคือ AI Coach ที่ต้องตอบแบบ "ต่อบทสนทนา" เท่านั้น
-
-กฎสำคัญ (ห้ามละเมิด):
-- ห้ามเริ่มบทสนทนาใหม่
-- ห้ามถามคำถามกว้าง ๆ เช่น "คุณเป็นใคร" หรือ "คุณทำอะไรได้บ้าง"
-- ต้องอ้างอิงจากสิ่งที่ผู้ใช้เพิ่งพูดล่าสุดเท่านั้น
-- ต้องทำให้บทสนทนาดูต่อเนื่องเหมือนคุยจริง
-
-โครงสร้างคำตอบ:
-1. สะท้อนสิ่งที่ผู้ใช้พูดล่าสุด 1 ประโยค
-2. เชื่อมความเข้าใจสั้น ๆ
-3. ปิดท้ายด้วยคำถามที่เกี่ยวข้องกับคำถามเดิมเท่านั้น
-
-โทน:
-- เป็นธรรมชาติ
-- อบอุ่น
-- ไม่เป็นแบบสอบถาม
-- ไม่ใช้ checklist
-
-ห้าม:
-- ห้ามถามคำถามใหม่ที่ไม่เกี่ยวกับคำถามเดิม
-- ห้าม general opening
-"""
-
-    user_prompt = f"""
-ข้อมูลก่อนหน้า:
-{context_text}
-
-คำถามเดิม:
-{rule["question"]}
-
-คำตอบล่าสุดของผู้ใช้ (สำคัญที่สุด):
-{user_answer}
-
-ผลประเมิน:
-status = {eval_result["status"]}
-reason = {eval_result["reason"]}
-
-retry = {retry}
-
-ต้องตอบแบบ "ต่อจากข้อความล่าสุดเท่านั้น โดยถามเพื่อเอาคำถามเดิม"
-"""
-
-    async for item in _stream_text_response(
-        model=model,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        temperature=0.7,
-    ):
-        yield item
-
-async def ask_phase_transition(
-    state,
-    from_phase: int,
-    to_phase: int,
-    next_rule: dict,
-    model: str = "gpt-4.1-mini"
-):
-    """
-    ใช้ตอนเปลี่ยน phase
-    สร้างข้อความเชื่อมบทสนทนา + ถามคำถามแรกของ phase ใหม่ (stream)
-
-    Example:
-    phase1 -> phase2
-    """
-
-    memory = dict(state.answers) if hasattr(state, "answers") else {}
-
-    context_lines = []
-    for k, v in memory.items():
-        context_lines.append(f"- {k}: {v}")
-
-    context_text = "\n".join(context_lines) if context_lines else "ไม่มีข้อมูล"
-
-    system_prompt = """
-คุณคือ AI Coach
-
-หน้าที่:
-เชื่อมบทสนทนาจาก phase ก่อนหน้า ไป phase ถัดไปอย่างเป็นธรรมชาติ
-พร้อมถามคำถามแรกของ phase ใหม่
-
-หลักการสำคัญ:
-- ผู้ใช้ต้องรู้สึกว่าบทสนทนาไหลต่อเนื่อง
-- สรุปสิ่งที่คุยมาก่อนหน้าแบบสั้น ๆ ได้
-- เชื่อมเข้าสู่มุมคิดใหม่ของ phase ถัดไป
-- ถามเพียง 1 คำถามหลัก
-- ฟังดูเป็นธรรมชาติ เหมือนโค้ชคุยจริง
-
-น้ำเสียง:
-- อบอุ่น
-- สุภาพ
-- มั่นคง
-- ชวนคิด
-
-รูปแบบ:
-- 2 ถึง 4 ประโยค
-- 1 ย่อหน้า
-- ไม่ bullet
-- ประโยคสุดท้ายต้องเป็นคำถาม
-
-ข้อห้าม:
-- ห้ามเป็นทางการเกินไป
-- ห้ามเหมือนแบบสอบถาม
-- ห้ามถามหลายคำถาม
-- ห้ามยาวเกินไป
-
-ตอบเฉพาะข้อความที่จะส่งให้ผู้ใช้
-"""
-
-    user_prompt = f"""
-ข้อมูลที่ผู้ใช้ตอบมาก่อนหน้า:
-{context_text}
-
-กำลังเปลี่ยน phase จาก:
-Phase {from_phase}
-
-ไปยัง:
-Phase {to_phase}
-
-คำถามแรกของ phase ใหม่:
-{next_rule["question"]}
-
-เป้าหมายของ phase นี้:
-{next_rule["goal"]}
-
-ช่วยสร้างข้อความ transition ที่ลื่นไหล เป็นธรรมชาติ และลงท้ายด้วยคำถามเดียว
-"""
-
-    async for item in _stream_text_response(
-        model=model,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        temperature=0.6,
-    ):
-        yield item
-        
 async def generate_opening_ai_coach_question_stream(
     fixed_question: str,
-    goal: str = "",
     model: str = "gpt-4.1-mini",
 ):
-    system_prompt = """
-คุณคือ AI Coach ที่กำลังเริ่มต้นบทสนทนากับผู้ใช้
+    system_prompt = """คุณคือ AI Coach ที่กำลังเริ่มต้นบทสนทนากับผู้ใช้
 
 บทบาท:
-- เป็นโค้ชที่ช่วยให้ผู้ใช้มองเห็นตัวเอง ความคิด และเป้าหมายได้ชัดขึ้น
-- น้ำเสียงอบอุ่น เป็นมิตร ธรรมชาติ และน่าไว้ใจ
-- สื่อสารเหมือนคนคุยกันจริง ไม่ใช่ระบบถามคำถาม
+- คุณคือโค้ชที่ช่วยให้ผู้ใช้ “มองเห็นตัวเองได้ชัดขึ้น”
+- การสื่อสารต้องให้ความรู้สึกเป็นมิตร อบอุ่น และเป็นธรรมชาติ
+- ไม่ใช่การซักถาม แต่เป็นการชวนคุย
 
 หน้าที่:
-- เปิดบทสนทนาอย่างนุ่มนวล
-- ชวนผู้ใช้รู้สึกปลอดภัยที่จะเล่า
-- ค่อย ๆ เชื่อมเข้าสู่คำถามหลักที่ระบบกำหนด
-- รักษาเจตนาของคำถามหลักไว้
+- เริ่มต้นด้วยการทักทายและแนะนำตัวสั้น ๆ
+- บอก purpose ของการคุย เช่น ช่วยให้มองเห็นตัวเอง/เป้าหมายชัดขึ้น
+- จากนั้น “ค่อย ๆ เชื่อม” ไปสู่คำถามหลักที่ระบบกำหนด
 
 หลักการสำคัญ:
-- ต้องฟังดูเป็นบทสนทนา ไม่ใช่แบบสอบถาม
-- ไม่ยิงคำถามทันที ควรมีประโยคนำก่อน
-- ใช้เพียง 1 คำถามหลักเท่านั้น
-- ห้ามเปลี่ยนประเด็นจากคำถามหลัก
-- หากคำถามหลักเป็นเรื่องความรู้สึก ให้โทนอ่อนโยนขึ้น
-- หากคำถามหลักเป็นเรื่องเป้าหมายหรือปัญหา ให้โทนชวนคิดอย่างเป็นธรรมชาติ
+- ต้องทำให้เหมือนบทสนทนา ไม่ใช่แบบสอบถาม
+- ห้ามยิงคำถามทันทีโดยไม่มีบริบท
+- ต้องมีการเกริ่นก่อนถาม
+- ต้องใช้คำถามเพียง 1 คำถามเท่านั้น
+- ต้องคงความหมายของคำถามหลักไว้
 
 ลักษณะภาษา:
-- ภาษาไทย
-- เป็นกันเอง สุภาพ ไม่แข็ง
-- ไม่เวอร์ ไม่โลกสวยเกินจริง
-- อ่านแล้วรู้สึกผ่อนคลาย
+- เป็นกันเอง ไม่ทางการเกินไป
+- ไม่แข็ง ไม่เป็นหุ่นยนต์
+- อ่านแล้วรู้สึกเหมือนมีคนคุยด้วยจริง
+- ใช้ภาษาไทย
 
 รูปแบบ:
-- 1 ย่อหน้า
-- 2 ถึง 4 ประโยค
+- ตอบเป็นย่อหน้าเดียว (Single paragraph)
 - ไม่ขึ้นบรรทัดใหม่
+- ความยาวประมาณ 2-4 ประโยค
 - ประโยคสุดท้ายต้องเป็นคำถาม
 
 ข้อห้าม:
-- ห้ามหลายคำถามในข้อความเดียว
-- ห้าม bullet / markdown
-- ห้ามยืดยาว
-- ห้ามพูดเหมือนหุ่นยนต์
+- ห้ามถามหลายคำถาม
+- ห้ามเปลี่ยนประเด็นของคำถามหลัก
+- ห้ามอธิบายยืดยาว
+- ห้ามใช้ bullet หรือ markdown
 
-ตอบเฉพาะข้อความที่จะส่งให้ผู้ใช้
-"""
+รูปแบบคำตอบ:
+- ตอบเฉพาะข้อความที่ใช้แสดงกับผู้ใช้"""
 
-    user_prompt = f"""
-คำถามหลัก:
+    user_prompt = f"""คำถามหลัก:
 {fixed_question}
 
-เป้าหมายของคำถาม:
-{goal}
-
-ช่วยเรียบเรียงเป็นข้อความเปิดบทสนทนาแบบ AI Coach ที่เป็นธรรมชาติ และลงท้ายด้วยคำถามเดียว
-"""
+ช่วยปรับคำถามนี้ให้เป็นคำถามเปิดบทสนทนาแบบโค้ช"""
 
     async for item in _stream_text_response(
         model=model,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        temperature=0.5,
+        temperature=0.4,
     ):
         yield item
 

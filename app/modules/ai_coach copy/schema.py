@@ -15,15 +15,12 @@ class StepAnswer(BaseModel):
     summary: str = ""
 
 class ChatState(BaseModel):
-    phase: int = 1
-    step: int = 0
-    retry_count: int = 0
-    last_question: str = ""
-    # คำตอบราย step
+    step: Optional[int] = None
+    fixed_question: str = None
+    last_question: str = None
+    # เก็บคำตอบแยกตามข้อ
     answers_by_step: Dict[int, StepAnswer] = Field(default_factory=dict)
-    # คำตอบแบบ semantic
-    answers: Dict[str, Any] = Field(default_factory=dict)
-    # ประวัติสนทนา
+    # ประวัติทั้งหมด
     history: List[Dict[str, Any]] = Field(default_factory=list)
 
 class ChatRequest_aicoach(BaseModel):

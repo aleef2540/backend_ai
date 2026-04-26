@@ -153,9 +153,9 @@ async def call_openai_chat_full(
     )
     
     # 🔥 print แค่ cost
-    print(f"[TOKEN] total={cost['total_tokens']}")
-    print(f"         prompt={cost['prompt_tokens']} | completion={cost['completion_tokens']}")
-    print(f"[COST]  ${cost['total_cost_usd']} (~{cost['total_cost_thb']} บาท)")
+    # print(f"[TOKEN] total={cost['total_tokens']}")
+    # print(f"         prompt={cost['prompt_tokens']} | completion={cost['completion_tokens']}")
+    # print(f"[COST]  ${cost['total_cost_usd']} (~{cost['total_cost_thb']} บาท)")
 
 
     return {
@@ -318,9 +318,9 @@ async def call_openai_chat_stream_full(
         completion_tokens=completion_tokens,
     )
 
-    print(f"[TOKEN] total={cost['total_tokens']}")
-    print(f"         prompt={cost['prompt_tokens']} | completion={cost['completion_tokens']}")
-    print(f"[COST]  ${cost['total_cost_usd']} (~{cost['total_cost_thb']} บาท)")
+    # print(f"[TOKEN] total={cost['total_tokens']}")
+    # print(f"         prompt={cost['prompt_tokens']} | completion={cost['completion_tokens']}")
+    # print(f"[COST]  ${cost['total_cost_usd']} (~{cost['total_cost_thb']} บาท)")
 
     yield {
         "type": "done",
