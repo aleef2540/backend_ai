@@ -11,6 +11,7 @@ from app.modules.ai_coach.service import (
    ask,
    ask_followup,
    ask_phase_transition,
+   generate_tgrow_final_summary_stream,
    generate_next_step_question_stream,
    generate_retry_same_step_question_stream,
    generate_probe_same_step_question_stream,
@@ -393,10 +394,33 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
                     return
 
                 # ไม่มี phase ต่อแล้ว
+                # ไม่มี phase ต่อแล้ว = ครบ TGROW แล้ว ให้ AI สรุปผล
                 else:
+                    final_reply = ""
+
+                    async for item in generate_tgrow_final_summary_stream(state):
+                        if item["type"] == "chunk":
+                            text = item.get("text", "")
+                            final_reply += text
+                            yield {
+                                "type": "chunk",
+                                "text": text
+                            }
+
+                        elif item["type"] == "done":
+                            final_reply = item.get("content", final_reply)
+
+                    state.history.append({
+                        "phase": state.phase,
+                        "step": state.step,
+                        "role": "assistant",
+                        "event": "coaching_complete_summary",
+                        "summary": final_reply,
+                    })
+
                     yield {
                         "type": "done",
-                        "reply": "ขอบคุณครับ วันนี้เราได้ประเด็นที่ชัดเจนมากขึ้นแล้ว",
+                        "reply": final_reply,
                         "status": "coaching_complete",
                         "reason": "all phases completed",
                         "state": state,

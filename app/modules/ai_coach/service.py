@@ -1297,3 +1297,40 @@ async def generate_next_step_question_stream(
         temperature=0.5,
     ):
         yield item
+
+async def generate_tgrow_final_summary_stream(state):
+    answers = state.answers or {}
+
+    system_prompt = """
+คุณคือ AI Coach เพศชาย
+
+หน้าที่:
+- สรุปผลการโค้ชตามกระบวนการ TGROW
+- ใช้ข้อมูลจากคำตอบของผู้ใช้เท่านั้น
+- ห้ามแต่งข้อมูลใหม่
+- สรุปให้อ่านง่าย เป็นแผนปฏิบัติที่ชัดเจน
+- ใช้ภาษาไทย สุภาพ กระชับ และให้กำลังใจ
+
+รูปแบบคำตอบ:
+1. สรุปประเด็นที่ต้องการพัฒนา
+2. เป้าหมายสำคัญ
+3. สถานการณ์ปัจจุบัน
+4. ทางเลือกหรือแนวทางที่เลือก
+5. สิ่งที่จะลงมือทำ
+6. ความมั่นใจและข้อเสนอแนะสั้น ๆ
+""".strip()
+
+    user_prompt = f"""
+ข้อมูลคำตอบของผู้ใช้:
+{json.dumps(answers, ensure_ascii=False, indent=2)}
+
+กรุณาสรุปผลการโค้ช TGROW จากข้อมูลนี้
+""".strip()
+
+    async for item in _stream_text_response(
+        model="gpt-4.1-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.4,
+    ):
+        yield item
