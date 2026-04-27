@@ -215,11 +215,31 @@ PHASE5_RULES = {
 }
 
 PHASES = {
-    1: PHASE1_RULES,
-    2: PHASE2_RULES,
-    3: PHASE3_RULES,
-    4: PHASE4_RULES,
-    5: PHASE5_RULES,
+    1: {
+        "name": "Topic",
+        "title": "หัวข้อที่ต้องการโค้ช",
+        "rules": PHASE1_RULES,
+    },
+    2: {
+        "name": "Goal",
+        "title": "เป้าหมาย",
+        "rules": PHASE2_RULES,
+    },
+    3: {
+        "name": "Reality",
+        "title": "สถานการณ์ปัจจุบัน",
+        "rules": PHASE3_RULES,
+    },
+    4: {
+        "name": "Options",
+        "title": "ทางเลือกและวิธีการ",
+        "rules": PHASE4_RULES,
+    },
+    5: {
+        "name": "Will",
+        "title": "การตัดสินใจลงมือทำ",
+        "rules": PHASE5_RULES,
+    },
 }
 
 

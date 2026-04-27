@@ -259,11 +259,12 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
 
     if state.phase == 1 and state.step == 0:
         next_step = 1
-        rule = PHASE1_RULES[next_step]
+
+        phase_data = PHASES[1]
+        rules = phase_data["rules"]
+        rule = rules[next_step]
 
         fixed_q = rule["question"]
-
-        final_reply = ""
 
         async for item in generate_opening_ai_coach_question_stream(
             fixed_question=fixed_q,
@@ -308,7 +309,8 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
     
     elif state.phase in PHASES:
 
-        rules = PHASES[state.phase]
+        phase_data = PHASES[state.phase]
+        rules = phase_data["rules"]
         rule = rules[state.step]
 
         result = await evaluate_answer(
@@ -364,13 +366,16 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
                 # ถ้ามี phase ต่อไป
                 if state.phase in PHASES:
 
-                    next_rule = PHASES[state.phase][1]
+                    next_phase_data = PHASES[state.phase]
+                    next_rule = next_phase_data["rules"][1]
 
                     final_reply = ""
 
                     async for item in ask_phase_transition(
                         state=state,
-                        next_rule=next_rule
+                        next_rule=next_rule,
+                        from_phase=PHASES[state.phase - 1]["title"],
+                        to_phase=PHASES[state.phase]["title"]
                     ):
                         if item["type"] == "chunk":
                             text = item.get("text", "")
