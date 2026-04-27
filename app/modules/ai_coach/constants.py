@@ -78,11 +78,148 @@ PHASE2_RULES = {
         "required": ["priority_success_target"],
         "answer_type": "success_goal",
     },
+
+    5: {
+        "key": "goal_importance",
+        "question": "เป้าหมายนี้มีความสำคัญกับคุณในเรื่องอะไร?",
+        "goal": "เข้าใจเหตุผลเชิงลึกว่าทำไมเป้าหมายนี้จึงสำคัญต่อผู้ใช้",
+        "required": ["goal_importance_reason"],
+        "answer_type": "importance",
+    },
+
+    6: {
+        "key": "goal_change",
+        "question": "การบรรลุความสำเร็จครั้งนี้จะเกิดการเปลี่ยนแปลงเรื่องอะไร?",
+        "goal": "เข้าใจการเปลี่ยนแปลงที่จะเกิดขึ้นทั้งในเชิงพฤติกรรม ผลลัพธ์ หรือสถานการณ์",
+        "required": ["expected_change"],
+        "answer_type": "change",
+    },
+
+    7: {
+        "key": "goal_benefit",
+        "question": "เป้าหมายนี้เกิดประโยชน์ในเรื่องอะไร?",
+        "goal": "ระบุประโยชน์ที่ผู้ใช้จะได้รับจากการบรรลุเป้าหมาย",
+        "required": ["goal_benefit"],
+        "answer_type": "benefit",
+    },
+
+    8: {
+        "key": "goal_positive_impact",
+        "question": "เป้าหมายนี้ช่วยให้เกิดผลดีในเรื่องอะไร?",
+        "goal": "เข้าใจผลกระทบเชิงบวกที่กว้างขึ้น เช่น ต่อทีม องค์กร หรือชีวิตโดยรวม",
+        "required": ["positive_impact"],
+        "answer_type": "impact",
+    },
+}
+
+PHASE3_RULES = {
+    1: {
+        "key": "current_score",
+        "question": "ถ้าเป้าหมายคือ 10 คะแนน...ปัจจุบันอยู่ที่คะแนนเท่าไร?",
+        "goal": "ประเมินสถานะปัจจุบันของผู้ใช้เทียบกับเป้าหมายที่ต้องการบรรลุ",
+        "required": ["current_score"],
+        "answer_type": "score",
+    },
+
+    2: {
+        "key": "knowledge_ability",
+        "question": "ความรู้ความสามารถของคุณในการบรรลุเป้าหมายคืออะไร?",
+        "goal": "สำรวจความรู้ ทักษะ และความสามารถที่ผู้ใช้มีอยู่ในปัจจุบันซึ่งเกี่ยวข้องกับการบรรลุเป้าหมาย",
+        "required": ["knowledge_or_ability"],
+        "answer_type": "capability",
+    },
+
+    3: {
+        "key": "required_competency",
+        "question": "สมรรถนะ (competency) ที่สำคัญในการบรรลุเป้าหมายคืออะไร?",
+        "goal": "ระบุสมรรถนะสำคัญที่จำเป็นต่อการบรรลุเป้าหมายของผู้ใช้",
+        "required": ["important_competency"],
+        "answer_type": "competency",
+    },
+
+    4: {
+        "key": "success_factor",
+        "question": "ปัจจัยสำคัญที่จะทำให้คุณประสบความสำเร็จคือเรื่องอะไร?",
+        "goal": "ค้นหาปัจจัย เงื่อนไข หรือองค์ประกอบสำคัญที่จะช่วยให้ผู้ใช้บรรลุเป้าหมาย",
+        "required": ["key_success_factor"],
+        "answer_type": "success_factor",
+    },
+}
+
+PHASE4_RULES = {
+    1: {
+        "key": "possible_methods",
+        "question": "การบรรลุเป้าหมายที่ตั้งใจไว้เมื่อเทียบกับปัจจุบันแล้วคุณมีวิธีการอะไรบ้าง?",
+        "goal": "สำรวจวิธีการที่เป็นไปได้ในการขยับจากสถานการณ์ปัจจุบันไปสู่เป้าหมาย",
+        "required": ["possible_methods"],
+        "answer_type": "options",
+    },
+
+    2: {
+        "key": "suitable_choices",
+        "question": "คุณมีทางเลือกที่เหมาะสมในการประสบความสำเร็จอะไรบ้าง?",
+        "goal": "ค้นหาทางเลือกที่เหมาะสมและเป็นไปได้สำหรับการบรรลุเป้าหมาย",
+        "required": ["suitable_choices"],
+        "answer_type": "choices",
+    },
+
+    3: {
+        "key": "goal_strategy",
+        "question": "การประเมินสถานการณ์ปัจจุบันแล้วคุณมีวิธีการพิชิตเป้าหมายอย่างไร?",
+        "goal": "เชื่อมโยงสถานการณ์ปัจจุบันกับแนวทางหรือกลยุทธ์ที่จะใช้เพื่อบรรลุเป้าหมาย",
+        "required": ["goal_strategy"],
+        "answer_type": "strategy",
+    },
+
+    4: {
+        "key": "action_plan_methods",
+        "question": "คุณมีแผนงานและวิธีการในการบรรลุเป้าหมายอย่างไร?",
+        "goal": "ระบุแผนงาน วิธีดำเนินการ และแนวทางปฏิบัติที่ผู้ใช้คิดว่าจะนำไปใช้จริง",
+        "required": ["action_plan_methods"],
+        "answer_type": "action_plan",
+    },
+}
+
+PHASE5_RULES = {
+    1: {
+        "key": "initial_action",
+        "question": "คุณตัดสินใจที่จะเริ่มลงมือทำในเรื่องอะไร?",
+        "goal": "ระบุการลงมือทำแรกที่ผู้ใช้ตั้งใจจะเริ่มดำเนินการทันที",
+        "required": ["initial_action"],
+        "answer_type": "action",
+    },
+
+    2: {
+        "key": "commitment_action",
+        "question": "การบรรลุเป้าหมายคุณตัดสินใจที่จะไปปฏิบัติในเรื่องอะไร?",
+        "goal": "ยืนยันการตัดสินใจและความตั้งใจในการลงมือปฏิบัติของผู้ใช้",
+        "required": ["commitment_action"],
+        "answer_type": "commitment",
+    },
+
+    3: {
+        "key": "action_summary",
+        "question": "คุณช่วยสรุปสิ่งที่คุณจะไปลงมือปฏิบัติเพื่อให้บรรลุเป้าหมายว่ามีอะไรบ้าง?",
+        "goal": "สรุปแผนการลงมือทำทั้งหมดให้ชัดเจนและเป็นรูปธรรม",
+        "required": ["action_summary"],
+        "answer_type": "summary",
+    },
+
+    4: {
+        "key": "confidence_level",
+        "question": "คุณมีความมั่นใจในแนวทางนี้มากแค่ไหน?",
+        "goal": "ประเมินระดับความมั่นใจของผู้ใช้ต่อแผนที่วางไว้",
+        "required": ["confidence_level"],
+        "answer_type": "confidence",
+    },
 }
 
 PHASES = {
     1: PHASE1_RULES,
     2: PHASE2_RULES,
+    3: PHASE3_RULES,
+    4: PHASE4_RULES,
+    5: PHASE5_RULES,
 }
 
 
