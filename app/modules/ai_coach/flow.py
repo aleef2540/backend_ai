@@ -258,6 +258,7 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
     # --------------------------------------------------
 
     if state.phase == 1 and state.step == 0:
+        final_reply =""
         next_step = 1
 
         phase_data = PHASES[1]
