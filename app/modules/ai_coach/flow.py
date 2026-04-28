@@ -347,6 +347,8 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
                     elif item["type"] == "done":
                         final_reply = item.get("content", final_reply)
 
+                state.last_question = final_reply
+
                 yield {
                     "type": "done",
                     "reply": final_reply,
@@ -388,6 +390,8 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
 
                         elif item["type"] == "done":
                             final_reply = item.get("content", final_reply)
+
+                    state.last_question = final_reply
 
                     yield {
                         "type": "done",
@@ -452,6 +456,8 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
 
             elif item["type"] == "done":
                 final_reply = item.get("content", final_reply)
+
+        state.last_question = final_reply
 
         yield {
             "type": "done",

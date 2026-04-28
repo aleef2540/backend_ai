@@ -7,6 +7,7 @@ import traceback
 from app.modules.ai_sale.schema import AISaleRequest, AISaleResetRequest
 from app.modules.ai_sale.state_store import ai_sale_state_store
 from app.modules.ai_sale.flow import process_ai_sale_stream
+from app.modules.ai_sale.log_bridge import insert_ai_sale_chat_log_bridge
 
 router = APIRouter(tags=["AI Sale"])
 
@@ -22,12 +23,8 @@ async def chat_ai_sale_stream(req: AISaleRequest):
 
     req.user_message = req.user_message.strip()
 
-    if req.state:
-        state = req.state
-        print("✅ USE STATE FROM REQUEST", flush=True)
-    else:
-        state = ai_sale_state_store.get_state(req.web_no, req.member_no)
-        print("✅ USE STATE FROM STORE", flush=True)
+    state = ai_sale_state_store.get_state(req.chat_id)
+    print("✅ USE STATE FROM STORE", flush=True)
 
     # print("STATE BEFORE =", state.model_dump(), flush=True)
 
@@ -67,14 +64,28 @@ async def chat_ai_sale_stream(req: AISaleRequest):
                     print("FINAL STATE =", final_state.model_dump(), flush=True)
 
                     ai_sale_state_store.set_state(
-                        req.web_no,
-                        req.member_no,
+                        req.chat_id,
                         final_state
                     )
 
+                    # ✅ บันทึก log ลง DB ผ่าน PHP bridge
+                    log_result = insert_ai_sale_chat_log_bridge(
+                        chat_id=req.chat_id,
+                        user_message=req.user_message,
+                        ai_reply=final_reply,
+                        state=final_state,
+                        status=item.get("status", ""),
+                        reason=item.get("reason", ""),
+                        source=final_source,
+                    )
+
+                    print("✅ AI SALE LOG RESULT =", log_result, flush=True)
+
+                    courses = item.get("courses", [])
                     payload = json.dumps({
                         "type": "done",
                         "reply": final_reply,
+                        "courses": courses,
                         "state": final_state.model_dump() if hasattr(final_state, "model_dump") else None,
                         "source": final_source,
                     }, ensure_ascii=False)
@@ -118,13 +129,11 @@ async def reset_ai_sale(payload: AISaleResetRequest):
     print("RESET PAYLOAD =", payload.model_dump(), flush=True)
 
     state = ai_sale_state_store.reset_state(
-        payload.web_no,
-        payload.member_no
+    payload.chat_id
     )
 
     return {
         "status": "ok",
         "state": state.model_dump(),
-        "web_no": payload.web_no,
-        "member_no": payload.member_no,
+        "chat_id": payload.chat_id,
     }

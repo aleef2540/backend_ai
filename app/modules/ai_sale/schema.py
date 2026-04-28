@@ -19,15 +19,11 @@ class AISaleState(BaseModel):
     last_answer: Optional[str] = None
     last_step: Optional[str] = None
     conversation_history: List[dict] = Field(default_factory=list)
-
+    recommended_course_cta: List[dict] = Field(default_factory=list)
 
 class AISaleRequest(BaseModel):
-    user_message: str
-    web_no: Optional[int] = None
-    member_no: Optional[int] = None
-    state: Optional[AISaleState] = None
-
+    chat_id: str = Field(..., min_length=1, max_length=36)
+    user_message: str = Field(..., min_length=1)
 
 class AISaleResetRequest(BaseModel):
-    web_no: Optional[int] = None
-    member_no: Optional[int] = None
+    chat_id: str = Field(..., min_length=1, max_length=36)

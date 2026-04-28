@@ -5,6 +5,8 @@ from app.modules.ai_sale.service import (
     build_next_question,
     build_search_query,
     build_recommendation_reply,
+    detect_post_recommend_intent,
+    build_more_courses_reply,
 )
 from app.modules.ai_sale.qdrant_service import search_courses_from_qdrant
 
@@ -14,26 +16,63 @@ async def process_ai_sale_stream(req, state):
         state = AISaleState()
 
     user_message = (req.user_message or "").strip()
-
-    state.web_no = int(req.web_no) if req.web_no not in [None, ""] else None
-    state.member_no = int(req.member_no) if req.member_no not in [None, ""] else None
     state.last_user_message = user_message
 
-    # ✅ เก็บข้อความ user เข้า history ก่อน
     state.conversation_history.append({
         "role": "user",
         "content": user_message
     })
 
-    # ✅ กัน history ยาวเกิน
-    if len(state.conversation_history) > 20:
-        state.conversation_history = state.conversation_history[-20:]
+    if len(state.conversation_history) > 10:
+        state.conversation_history = state.conversation_history[-10:]
 
-    state.requirements = await extract_requirements(
-        user_message=user_message,
-        current_requirements=state.requirements or {},
-        conversation_history=state.conversation_history
-    )
+    # ✅ ใส่ตรงนี้
+    skip_extract = False
+    if state.mode == "post_recommend":
+        post_intent = await detect_post_recommend_intent(
+            user_message=user_message,
+            requirements=state.requirements or {},
+            conversation_history=state.conversation_history
+        )
+
+        print("POST RECOMMEND INTENT =", post_intent, flush=True)
+        print("STATE MODE =", state.mode, flush=True)
+
+        state.last_step = post_intent.get("intent", "unclear")
+
+        if post_intent["intent"] == "new_requirement":
+            state.requirements = {}
+            state.missing_requirements = []
+            state.requirement_ready = False
+            state.search_query = None
+            state.recommended_courses = []
+            state.recommended_course_cta = []
+            state.mode = "discovery"
+
+            # ✅ สำคัญมาก: ล้าง history เก่า เหลือเฉพาะข้อความล่าสุด
+            state.conversation_history = [{
+                "role": "user",
+                "content": user_message
+            }]
+
+        elif post_intent["intent"] == "ask_more_courses":
+            skip_extract = True
+            state.mode = "discovery"
+            state.last_step = "ask_more_courses"
+
+        elif post_intent["intent"] == "refine_requirement":
+            state.mode = "discovery"
+
+        else:
+            state.mode = "discovery"
+
+    # 👇 แล้วค่อย extract
+    if not skip_extract:
+        state.requirements = await extract_requirements(
+            user_message=user_message,
+            current_requirements=state.requirements or {},
+            conversation_history=state.conversation_history
+        )
 
     missing = calc_missing_requirements(state.requirements)
 
@@ -41,26 +80,36 @@ async def process_ai_sale_stream(req, state):
     state.requirement_ready = len(missing) == 0
 
     if missing:
-        reply = await build_next_question(
+        reply = ""
+
+        async for item in build_next_question(
             state.requirements,
             missing,
             state.conversation_history
-        )
+        ):
+            if item.get("type") == "chunk":
+                text = item.get("text", "")
+                reply += text
+                yield {
+                    "type": "chunk",
+                    "text": text
+                }
+
+            elif item.get("type") == "done":
+                reply = item.get("content") or reply
 
         state.mode = "discovery"
         state.last_answer = reply
         state.last_step = "ask_requirement"
 
-        # ✅ เก็บคำตอบ AI เข้า history
         state.conversation_history.append({
             "role": "assistant",
             "content": reply
         })
 
-        if len(state.conversation_history) > 20:
-            state.conversation_history = state.conversation_history[-20:]
+        if len(state.conversation_history) > 10:
+            state.conversation_history = state.conversation_history[-10:]
 
-        yield {"type": "chunk", "text": reply}
         yield {
             "type": "done",
             "reply": reply,
@@ -74,28 +123,78 @@ async def process_ai_sale_stream(req, state):
     search_query = await build_search_query(state.requirements)
     state.search_query = search_query
 
-    courses = await search_courses_from_qdrant(search_query, limit=5)
+    # สมมติว่า state.recommended_courses เก็บ course_no ที่แนะนำไปแล้ว
+    excluded_courses = [course['course_no'] for course in state.recommended_courses]
+
+    # ค้นหาหลักสูตรที่ไม่ซ้ำกับที่แนะนำไปแล้ว
+    courses = await search_courses_from_qdrant(search_query, limit=3, excluded_courses=excluded_courses)
+
+    courses = await search_courses_from_qdrant(search_query, limit=3)
     state.recommended_courses = courses
 
-    reply = await build_recommendation_reply(
+    course_cta = []
+
+    for c in courses:
+        payload = c.get("payload") or c
+
+        course_no = (
+            payload.get("course_no")
+            or payload.get("OCourse_no")
+            or payload.get("id")
+        )
+
+        course_name = (
+            payload.get("course_name")
+            or payload.get("vdo_name")
+            or payload.get("Course_name")
+            or payload.get("title")
+        )
+
+        if course_no and course_name:
+            course_cta.append({
+                "course_no": course_no,
+                "course_name": course_name,
+            })
+
+    reply = ""
+
+    # ✅ เลือก function ตาม intent
+    if state.last_step == "ask_more_courses":
+        reply_builder = build_more_courses_reply
+    else:
+        reply_builder = build_recommendation_reply
+
+    reply = ""
+
+    async for item in reply_builder(
         requirements=state.requirements,
         courses=courses
-    )
+    ):
+        
+        if item.get("type") == "chunk":
+            text = item.get("text", "")
+            reply += text
+            yield {
+                "type": "chunk",
+                "text": text
+            }
 
-    state.mode = "recommend"
+        elif item.get("type") == "done":
+            reply = item.get("content") or reply
+
+    state.mode = "post_recommend"
     state.last_answer = reply
     state.last_step = "recommend_course"
+    state.recommended_course_cta = course_cta
 
-    # ✅ เก็บคำตอบ AI เข้า history
     state.conversation_history.append({
         "role": "assistant",
         "content": reply
     })
 
-    if len(state.conversation_history) > 20:
-        state.conversation_history = state.conversation_history[-20:]
+    if len(state.conversation_history) > 10:
+        state.conversation_history = state.conversation_history[-10:]
 
-    yield {"type": "chunk", "text": reply}
     yield {
         "type": "done",
         "reply": reply,
