@@ -68,11 +68,7 @@ async def check_topic_exists_in_qdrant(
         print(f"    Score: {score}", flush=True)
 
 
-    # ตรวจสอบเงื่อนไขคะแนน
-    if best_score >= min_score:
-        return course_name
-    else:
-        return ""
+    return best_score >= min_score
 
 async def search_courses_from_qdrant(query: str, limit: int = 3, excluded_courses: list = []):
     vector = embed_text_openai(query)

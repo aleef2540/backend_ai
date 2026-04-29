@@ -7,10 +7,8 @@ from app.modules.ai_sale.service import (
     build_recommendation_reply,
     detect_post_recommend_intent,
     build_more_courses_reply,
-    build_irrelevant_topic_reply,
-    build_next_question_topic
 )
-from app.modules.ai_sale.qdrant_service import search_courses_from_qdrant, check_topic_exists_in_qdrant
+from app.modules.ai_sale.qdrant_service import search_courses_from_qdrant
 
 
 async def process_ai_sale_stream(req, state):
@@ -82,101 +80,16 @@ async def process_ai_sale_stream(req, state):
         )
 
         new_topic = new_requirements.get("topic")
-        new_topic_norm = (new_topic or "").strip()
-        old_topic_norm = (old_topic or "").strip()
 
-        print(f"TOPIC CHECK | new topic={new_topic_norm} | old topic={old_topic_norm}", flush=True)
-
-        if new_topic and new_topic_norm != old_topic_norm:
-            
-            # 1. เรียกใช้งานฟังก์ชัน (จะได้ค่าเป็น "ชื่อหลักสูตร" หรือ "")
-            topic_check_courses = await check_topic_exists_in_qdrant(
+        if new_topic and new_topic != old_topic:
+            topic_check_courses = await search_courses_from_qdrant(
                 new_topic,
                 limit=1
             )
 
-            # 2. เช็คกรณี "หาหัวข้อไม่เจอ" และเป็น "หัวข้อใหม่ที่ไม่มีบริบทเก่า"
-            # ใช้ if not topic_check_courses ได้เลย (เพราะ "" คือ False)
-            if new_topic and not topic_check_courses and not old_topic:
-                reply = ""
-
-                
-                async for item in build_irrelevant_topic_reply(
-                    user_message=user_message,
-                    old_topic=old_topic,
-                    conversation_history=state.conversation_history
-                ):
-                    if item.get("type") == "chunk":
-                        text = item.get("text", "")
-                        reply += text
-                        yield {"type": "chunk", "text": text}
-
-                    elif item.get("type") == "done":
-                        reply = item.get("content") or reply
-
-                state.last_answer = reply
-                state.last_step = "irrelevant_topic"
-
-                state.conversation_history.append({
-                    "role": "assistant",
-                    "content": reply
-                })
-
-                yield {
-                    "type": "done",
-                    "reply": reply,
-                    "status": "irrelevant",
-                    "reason": "topic_not_found",
-                    "state": state,
-                }
-                return
-
-            # 3. กรณีที่เจอหลักสูตรที่เกี่ยวข้อง (Score ผ่านเกณฑ์)
-            # ... ภายใน Logic หลักของคุณ ...
-
             if topic_check_courses:
                 state.requirements = new_requirements
-                # ✅ เก็บ topic เดิมของ user
-                state.requirements["topic"] = new_topic
-
-                # ✅ แยกเก็บ course ที่ match
-                state.requirements["matched_course"] = topic_check_courses
-
-                reply = ""
-                print("CALL build_next_question_topic", flush=True)
-                async for item in build_next_question_topic(
-                    requirements=state.requirements,
-                    missing=calc_missing_requirements(state.requirements),
-                    conversation_history=state.conversation_history,
-                    matched_course=state.requirements.get("matched_course")
-                ):
-                    if item.get("type") == "chunk":
-                        text = item.get("text", "")
-                        reply += text
-                        yield {"type": "chunk", "text": text}
-                    elif item.get("type") == "done":
-                        reply = item.get("content") or reply
-
-                state.last_answer = reply
-                state.last_step = "ask_requirement_topic"
-                state.mode = "discovery"
-
-                state.conversation_history.append({
-                    "role": "assistant",
-                    "content": reply
-                })
-
-                yield {
-                    "type": "done",
-                    "reply": reply,
-                    "status": "collecting_requirement",
-                    "reason": "matched_topic_need_more_info",
-                    "state": state,
-                    "source": "ai_sale_discovery",
-                }
-                return
-
-            # 4. กรณีที่ไม่เจอหลักสูตรใหม่ แต่มีหัวข้อเก่า (Old Topic) ให้ประคองไว้
+                print(f"USE NEW TOPIC: {new_topic}", flush=True)
             else:
                 if old_topic:
                     new_requirements["topic"] = old_topic
@@ -195,7 +108,7 @@ async def process_ai_sale_stream(req, state):
 
     if missing:
         reply = ""
-        print("CALL build_next_question", flush=True)
+
         async for item in build_next_question(
             state.requirements,
             missing,
@@ -241,9 +154,9 @@ async def process_ai_sale_stream(req, state):
     excluded_courses = [course['course_no'] for course in state.recommended_courses]
 
     # ค้นหาหลักสูตรที่ไม่ซ้ำกับที่แนะนำไปแล้ว
-    courses = await search_courses_from_qdrant(search_query, limit=1, excluded_courses=excluded_courses)
+    courses = await search_courses_from_qdrant(search_query, limit=3, excluded_courses=excluded_courses)
 
-    # courses = await search_courses_from_qdrant(search_query, limit=3)
+    courses = await search_courses_from_qdrant(search_query, limit=3)
     state.recommended_courses = courses
 
     course_cta = []

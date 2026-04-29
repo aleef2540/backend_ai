@@ -9,7 +9,6 @@ OPENAI_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-large")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 QDRANT_COLLECTION = os.getenv("QDRANT_COURSE_COLLECTION", "course_objects")
-QDRANT_COURSE_COLLECTION = os.getenv("QDRANT_COURSE_COLLECTION_EN", "en_course")
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -27,52 +26,6 @@ def embed_text_openai(text: str):
     return res.data[0].embedding
 
 
-async def check_topic_exists_in_qdrant(
-    topic: str,
-    limit: int = 1,
-    min_score: float = 0.35
-) -> bool:
-    """
-    ใช้เช็คว่า topic นี้มีข้อมูลใน Qdrant หรือไม่
-    แยกจาก search_courses_from_qdrant โดยสิ้นเชิง
-    """
-
-    if not topic or not topic.strip():
-        return False
-
-    vector = embed_text_openai(topic.strip())
-
-    hits = qdrant_client.query_points(
-        collection_name=QDRANT_COURSE_COLLECTION,
-        query=vector,
-        limit=limit,
-        with_payload=True,
-    )
-
-    if not hits.points:
-        return False
-
-    best_score = hits.points[0].score or 0
-
-    print(
-        f"TOPIC CHECK | topic={topic} | score={best_score}",
-        flush=True
-    )
-
-     # แสดงรายละเอียดของหลักสูตรที่ตรงกับ topic
-    for hit in hits.points:
-        course_name = hit.payload.get('course_name', 'ไม่มีข้อมูลชื่อหลักสูตร')
-        score = hit.score or 0
-
-        print(f"  - Found Course: {course_name}")
-        print(f"    Score: {score}", flush=True)
-
-
-    # ตรวจสอบเงื่อนไขคะแนน
-    if best_score >= min_score:
-        return course_name
-    else:
-        return ""
 
 async def search_courses_from_qdrant(query: str, limit: int = 3, excluded_courses: list = []):
     vector = embed_text_openai(query)

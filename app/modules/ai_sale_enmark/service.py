@@ -5,13 +5,13 @@ from app.shared.ai.openai_client import call_openai_chat_full, call_openai_chat_
 REQUIRED_FIELDS = [
     "topic",
     "pain_point",
+    "development_goal",
     "target_group",
 ]
 
 OPTIONAL_FIELDS = [
     "competency",
     "budget",
-        "development_goal",
 ]
 
 FIELD_LABELS = {
@@ -93,7 +93,9 @@ async def extract_requirements(
     conversation_context = build_conversation_context(conversation_history)
 
     system_prompt = f"""
-คุณคือ AI Sales Consultant สำหรับคุยกับลูกค้าเพื่อแนะนำหลักสูตรฝึกอบรมของสถาบัน
+คุณคือ AI Sales Consultant สำหรับคุยกับลูกค้าเพื่อแนะนำหลักสูตรฝึกอบรมระบบนี้รองรับเฉพาะหลักสูตรฝึกอบรมพนักงาน การพัฒนาองค์กร การพัฒนาผู้นำ การขาย บริการ การบริหาร และ soft skills ในองค์กรเท่านั้น
+
+หากผู้ใช้ถามเรื่องหลักสูตรทั่วไป เช่น เลี้ยงแมว ทำอาหาร เล่นหุ้น ภาษา ดนตรี ให้ถือว่าอยู่นอกขอบเขต
 
 หน้าที่ของคุณ:
 - อ่านบทสนทนาแล้วสกัด Requirement ที่ลูกค้าบอกไว้
@@ -102,9 +104,9 @@ async def extract_requirements(
 - ห้ามเดา ถ้าไม่ชัดให้เว้นว่าง
 
 Requirement ที่ต้องเก็บ:
-- topic = ระบุหัวข้อหรือสิ่งที่ผู้ใช้พูดถึง
+- topic = ระบุเฉพาะ "หัวข้อการฝึกอบรม" ที่ผู้ใช้ต้องการเรียน หรือกล่าวถึงโดยตรงเท่านั้น
 - pain_point = ปัญหา / สถานการณ์ / ความท้าทายที่กำลังเจอแบบเฉพาะเจาะจง
-- development_goal = ผลลัพธ์ที่อยากให้ผู้เรียนเปลี่ยนแปลงหลังเรียนเกี่ยวกับเรื่องหลักสูตรขิงสถาบันเท่านั้น
+- development_goal = ผลลัพธ์ที่อยากให้ผู้เรียนเปลี่ยนแปลงหลังเรียน
 - competency = ทักษะหรือสมรรถนะที่ต้องการพัฒนา เช่น การปิดการขาย การสื่อสาร การบริหารทีม การคิดเชิงกลยุทธ์
 - target_group = กลุ่มผู้เรียน เช่น พนักงานทั่วไป หัวหน้างาน ผู้จัดการ ผู้บริหาร ทีมขาย
 - budget = งบประมาณโดยประมาณ
@@ -116,6 +118,7 @@ Requirement เดิม:
 {conversation_context}
 
 กฎสำคัญ:
+- topic มีเฉพาะที่เกี่ยวกับการฝึกอบรม หรือ การพัฒนาตนเองเท่านั้น ถ้านอกเรื่องให้เป็น ""
 - ถ้าข้อมูลเดิมมีอยู่แล้ว และข้อความใหม่ไม่ได้แก้ไข ให้คงค่าเดิม
 - ถ้าข้อความใหม่ให้ข้อมูลชัดกว่าเดิม ให้ปรับให้ดีขึ้น
 - ถ้าผู้ใช้ตอบสั้น ๆ เช่น "หัวหน้างาน" ให้ตีความว่าเป็นคำตอบของคำถามล่าสุดจากบริบทได้
@@ -125,6 +128,15 @@ Requirement เดิม:
 - ถ้าผู้ใช้บอกเพียงว่า "มีปัญหา" แต่ไม่บอกปัญหาอะไร ให้ pain_point เป็น ""
 - ถ้า pain_point ชัด เช่น "ปิดการขายไม่ได้", "หัวหน้างานสื่อสารไม่ดี", "ทีมบริการโดนลูกค้าร้องเรียน" ให้เก็บได้ทันที
 - competency สามารถสรุปจาก pain_point หรือ development_goal ได้ ถ้าชัดเจนมากพอ แต่ห้ามเดาเกินข้อมูลที่มี
+
+ห้ามใช้ pain point มาแทน topic
+
+ตัวอย่าง:
+- "ยอดขายตก" => topic = ""
+- "ทีมขายปิดการขายไม่ได้" => topic = ""
+- "อยากอบรมเรื่องการปิดการขาย" => topic = "การปิดการขาย"
+- "หัวหน้างานสื่อสารไม่ดี" => topic = ""
+- "ขอหลักสูตร communication สำหรับหัวหน้า" => topic = "การสื่อสาร"
 
 รูปแบบ JSON:
 {{
@@ -183,7 +195,9 @@ async def build_next_question(
     conversation_context = build_conversation_context(conversation_history)
 
     system_prompt = """
-คุณคือ AI Sales Consultant สำหรับคุยกับลูกค้าเพื่อแนะนำหลักสูตรฝึกอบรมของสถาบันห้ามชวนคุยหรือแนะนำเรื่องที่ไม่เกี่ยวข้อง
+คุณคือ AI Sales Consultant สำหรับคุยกับลูกค้าเพื่อแนะนำหลักสูตรฝึกอบรมระบบนี้รองรับเฉพาะหลักสูตรฝึกอบรมพนักงาน การพัฒนาองค์กร การพัฒนาผู้นำ การขาย บริการ การบริหาร โรงงาน chatgpt และ soft skills ในองค์กรเท่านั้น
+
+หากผู้ใช้ถามเรื่องหลักสูตรทั่วไป เช่น เลี้ยงแมว ทำอาหาร เล่นหุ้น ภาษา ดนตรี ให้ถือว่าอยู่นอกขอบเขต
 
 บุคลิกการคุย:
 - เป็นธรรมชาติ อบอุ่น สุภาพ เหมือนฝ่ายขายมืออาชีพ
@@ -192,7 +206,6 @@ async def build_next_question(
 - คุยต่อจากสิ่งที่ลูกค้าเล่า
 - ถ้าลูกค้าเล่าปัญหามา ให้สะท้อนความเข้าใจก่อน แล้วค่อยถามต่อ
 - ถ้าลูกค้ายังพูดกว้าง ให้ช่วยจัดกรอบให้เลือกง่ายขึ้น
-- **ห้ามพูดเรื่องที่ไม่เกี่ยวข้องกับการฝึกอบรมหรือทักษะที่เกี่ยวข้องกับหลักสูตรฝึกอบรม**
 
 ข้อกำหนด:
 - ตอบ 2-3 ประโยค
@@ -437,101 +450,5 @@ Courses:
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.3,
-    ):
-        yield item
-
-async def build_irrelevant_topic_reply(
-    user_message: str,
-    old_topic: str | None,
-    conversation_history: list | None = None
-):
-    conversation_context = build_conversation_context(conversation_history)
-
-    system_prompt = """
-คุณคือ AI Sales Consultant สำหรับแนะนำหลักสูตรฝึกอบรมในองค์กร
-
-เป้าหมาย:
-- ถ้าลูกค้าพูดเรื่องที่ไม่เกี่ยวกับหลักสูตรหรืออยู่นอก scope
-- ให้ตอบแบบสุภาพ ไม่ปฏิเสธแข็ง
-- พยายามดึงบทสนทนากลับมาที่เรื่องการพัฒนา/อบรม/ทักษะ
-- ถ้ามี topic เดิม ให้โยงกลับไป
-
-สไตล์:
-- สุภาพ เป็นธรรมชาติ
-- 2-3 ประโยค
-- ไม่แข็ง ไม่ robotic
-- ปิดท้ายด้วยคำถาม 1 คำถามเพื่อพากลับเข้า flow
-""".strip()
-
-    user_prompt = f"""
-ข้อความล่าสุดของลูกค้า:
-{user_message}
-
-topic ก่อนหน้า:
-{old_topic}
-
-บทสนทนาก่อนหน้า:
-{conversation_context}
-
-ช่วยตอบลูกค้า:
-- บอกแบบสุภาพว่าสิ่งที่พูดอาจไม่ตรงกับหลักสูตร
-- แล้วพากลับไปคุยเรื่อง training / skill / development
-- ถ้ามี topic เดิม ให้โยงกลับ
-- ปิดด้วยคำถาม 1 คำถาม
-""".strip()
-
-    async for item in _stream_text_response(
-        model="gpt-4.1-mini",
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        temperature=0.6,
-    ):
-        yield item
-    
-
-async def build_next_question_topic(
-    requirements: dict,
-    missing: list,
-    conversation_history: list | None = None,
-    matched_course: str | None = None  # <--- เพิ่มตัวแปรนี้
-):
-    next_field = missing[0]
-    label = FIELD_LABELS.get(next_field, next_field)
-    conversation_context = build_conversation_context(conversation_history)
-
-    # ปรับ System Prompt เล็กน้อยเพื่อให้ยอมรับการ "เสนอชื่อหลักสูตร"
-    system_prompt = """
-คุณคือ AI Sales Consultant สำหรับแนะนำหลักสูตรฝึกอบรม
-หน้าที่ของคุณคือ:
-1. แจ้งชื่อหลักสูตรที่ใกล้เคียงกับสิ่งที่ลูกค้าสนใจ (ถ้ามีข้อมูล matched_course)
-2. สะท้อนความเข้าใจในสิ่งที่ลูกค้าต้องการ
-3. ถามข้อมูลที่ขาดอยู่ 1 ข้ออย่างเป็นธรรมชาติ
-
-บุคลิก: มืออาชีพ, อบอุ่น, ไม่ถามเหมือนบอท, ห้ามลิสต์ทุกอย่างที่ขาด
-""".strip()
-
-    # ปรับ User Prompt ให้ใส่ชื่อหลักสูตรที่เจอลงไป
-    matched_info = f"\nหลักสูตรที่ระบบพบว่าใกล้เคียงที่สุด: {matched_course}" if matched_course else ""
-    
-    user_prompt = f"""
-บทสนทนาก่อนหน้า:
-{conversation_context}
-
-Requirement ปัจจุบัน:
-{json.dumps(requirements or {}, ensure_ascii=False)}
-{matched_info} 
-
-ข้อมูลที่ต้องถามเพิ่มตอนนี้คือ: {label}
-
-คำแนะนำ: 
-- ถ้ามีชื่อหลักสูตรที่ใกล้เคียง ให้เริ่มต้นด้วยการบอกว่าเรามีหลักสูตร "{matched_course}" ที่น่าจะตอบโจทย์
-- จากนั้นค่อยถามเพื่อเก็บข้อมูล "{label}" ต่อไปแบบเนียนๆ
-""".strip()
-
-    async for item in _stream_text_response(
-        model="gpt-4o-mini", # แนะนำให้เช็คชื่อ model อีกทีครับ ปกติจะเป็น gpt-4o-mini
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        temperature=0.55,
     ):
         yield item

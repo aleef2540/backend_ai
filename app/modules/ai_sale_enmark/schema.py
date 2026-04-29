@@ -14,7 +14,6 @@ class AISaleState(BaseModel):
 
     search_query: Optional[str] = None
     recommended_courses: List[dict] = Field(default_factory=list)
-    matched_course: Optional[str] = None
 
     last_user_message: Optional[str] = None
     last_answer: Optional[str] = None
