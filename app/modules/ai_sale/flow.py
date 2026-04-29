@@ -96,11 +96,13 @@ async def process_ai_sale_stream(req, state):
         # if new_topic and new_topic_norm != old_topic_norm:
         if True:
             
-            # 1. เรียกใช้งานฟังก์ชัน (จะได้ค่าเป็น "ชื่อหลักสูตร" หรือ "")
-            topic_check_courses, course_id = await check_topic_exists_in_qdrant(
-                req,
-                limit=1
-            )
+            if not new_topic_norm:
+                state.requirements = new_requirements
+            else:
+                topic_check_courses, course_id = await check_topic_exists_in_qdrant(
+                    new_topic,
+                    limit=1
+                )
 
             # 2. เช็คกรณี "หาหัวข้อไม่เจอ" และเป็น "หัวข้อใหม่ที่ไม่มีบริบทเก่า"
             # ใช้ if not topic_check_courses ได้เลย (เพราะ "" คือ False)
