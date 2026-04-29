@@ -21,6 +21,7 @@ def insert_ai_sale_chat_log_bridge(
         from_web,
         user_message,
         ai_reply,
+        matched_course_id,
         mode,
         status,
         reason,
@@ -31,7 +32,7 @@ def insert_ai_sale_chat_log_bridge(
         created_at
     )
     VALUES
-    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     """
 
     params = [
@@ -41,6 +42,7 @@ def insert_ai_sale_chat_log_bridge(
         getattr(state, "from_web", None),
         user_message,
         ai_reply,
+        getattr(state, "matched_course_id", ""),
         getattr(state, "mode", ""),
         status or "",
         reason or "",
