@@ -99,7 +99,16 @@ async def process_ai_sale_stream(req, state):
         if True:
             
             if not req:
-                topic_check_courses, course_id = "", None
+                    reply = "อยากให้ช่วยพัฒนาทักษะด้านไหนเป็นพิเศษครับ"
+
+                    yield {
+                        "type": "done",
+                        "reply": reply,
+                        "status": "collecting_requirement",
+                        "reason": "missing_topic",
+                        "state": state,
+                    }
+                    return
             else:
                  # 1. เรียกใช้งานฟังก์ชัน (จะได้ค่าเป็น "ชื่อหลักสูตร" หรือ "")
                 topic_check_courses, course_id = await check_topic_exists_in_qdrant(
