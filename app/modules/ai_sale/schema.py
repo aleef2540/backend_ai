@@ -5,7 +5,7 @@ from typing import Optional, List, Dict, Any
 class AISaleState(BaseModel):
     web_no: Optional[int] = None
     member_no: Optional[int] = None
-
+    from_web: str = ""
     mode: str = "discovery"
 
     requirements: Dict[str, Any] = Field(default_factory=dict)

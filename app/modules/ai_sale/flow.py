@@ -16,7 +16,9 @@ async def process_ai_sale_stream(req, state):
         state = AISaleState()
 
     user_message = (req.user_message or "").strip()
+    from_web = (req.from_web or "").strip()
     state.last_user_message = user_message
+    state.from_web = from_web
 
     state.conversation_history.append({
         "role": "user",
