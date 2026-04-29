@@ -11,7 +11,7 @@ from app.modules.ai_sale.service import (
     build_next_question_topic
 )
 from app.modules.ai_sale.qdrant_service import search_courses_from_qdrant, check_topic_exists_in_qdrant
-
+import json
 
 async def process_ai_sale_stream(req, state):
     if state is None:
@@ -80,17 +80,24 @@ async def process_ai_sale_stream(req, state):
             current_requirements=state.requirements or {},
             conversation_history=state.conversation_history
         )
-
+        state.requirements = new_requirements
+        req = json.dumps(new_requirements or {}, ensure_ascii=False)
+        req = " ".join(
+            str(v)
+            for k, v in (new_requirements or {}).items()
+            if k != "matched_course"
+        )
         new_topic = new_requirements.get("topic")
         new_topic_norm = (new_topic or "").strip()
         old_topic_norm = (old_topic or "").strip()
 
-        print(f"TOPIC CHECK | new topic={new_topic_norm} | old topic={old_topic_norm}", flush=True)
+        print(f"TOPIC CHECK | new topic={new_topic_norm} | old topic={old_topic_norm} | req={req}", flush=True)
 
-        if new_topic and new_topic_norm != old_topic_norm:
+        # if new_topic and new_topic_norm != old_topic_norm:
+        if True:
             
             # 1. เรียกใช้งานฟังก์ชัน (จะได้ค่าเป็น "ชื่อหลักสูตร" หรือ "")
-            topic_check_courses = await check_topic_exists_in_qdrant(
+            topic_check_courses, course_id = await check_topic_exists_in_qdrant(
                 new_topic,
                 limit=1
             )
@@ -158,6 +165,8 @@ async def process_ai_sale_stream(req, state):
                         reply = item.get("content") or reply
 
                 state.last_answer = reply
+                state.matched_course = state.requirements["matched_course"]
+                state.matched_course_id = course_id
                 state.last_step = "ask_requirement_topic"
                 state.mode = "discovery"
 

@@ -62,6 +62,7 @@ async def check_topic_exists_in_qdrant(
      # แสดงรายละเอียดของหลักสูตรที่ตรงกับ topic
     for hit in hits.points:
         course_name = hit.payload.get('course_name', 'ไม่มีข้อมูลชื่อหลักสูตร')
+        course_id = hit.payload.get('course_id', 'ไม่มีข้อมูล ID')
         score = hit.score or 0
 
         print(f"  - Found Course: {course_name}")
@@ -70,9 +71,9 @@ async def check_topic_exists_in_qdrant(
 
     # ตรวจสอบเงื่อนไขคะแนน
     if best_score >= min_score:
-        return course_name
+        return course_name, course_id
     else:
-        return ""
+        return "", ""
 
 async def search_courses_from_qdrant(query: str, limit: int = 3, excluded_courses: list = []):
     vector = embed_text_openai(query)
