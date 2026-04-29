@@ -496,13 +496,24 @@ async def build_next_question_topic(
     matched_course: str | None = None  # <--- เพิ่มตัวแปรนี้
 ):
 
-
+    clean_requirements = {
+    k: v for k, v in (requirements or {}).items()
+    if k != "matched_course"
+}
     conversation_context = build_conversation_context(conversation_history)
 
     if not missing:
         system_prompt = """
 คุณคือ AI Sales Consultant สำหรับแนะนำหลักสูตรฝึกอบรม
-ให้สรุปความต้องการของลูกค้า และแนะนำขั้นตอนถัดไปอย่างเป็นธรรมชาติ
+
+หน้าที่ของคุณ:
+- สรุปความต้องการของลูกค้าแบบสั้น กระชับ เป็นภาษาพูด
+- แนะนำหลักสูตรที่เหมาะสม ถ้ามี matched_course
+- ห้ามลิสต์ข้อมูลเป็น bullet
+- ห้ามแต่งขั้นตอนถัดไปเอง
+- ห้ามพูดเรื่องลงทะเบียน ถ้า user ยังไม่ได้ขอ
+- ห้ามพูดว่าทีมงานจะติดต่อกลับภายใน 24 ชั่วโมง
+- ตอบไม่เกิน 2-3 ประโยค
 """.strip()
 
         matched_info = f'\nหลักสูตรที่ระบบพบว่าใกล้เคียงที่สุด: {matched_course}' if matched_course else ""
@@ -512,11 +523,13 @@ async def build_next_question_topic(
 {conversation_context}
 
 Requirement ปัจจุบัน:
-{json.dumps(requirements or {}, ensure_ascii=False)}
+{json.dumps(clean_requirements or {}, ensure_ascii=False)}
 {matched_info}
 
 ตอนนี้เก็บข้อมูลครบแล้ว ไม่ต้องถามข้อมูลเพิ่ม
-ให้สรุปความต้องการลูกค้าก่อน แล้วค่อยแนะนำหลักสูตรที่เหมาะสม ถ้ามี
+ห้ามใช้ bullet
+ห้ามสรุปเป็นรายการ
+ห้ามสร้างข้อความ CTA เอง
 """.strip()
 
         async for item in _stream_text_response(
@@ -552,7 +565,7 @@ Requirement ปัจจุบัน:
 {conversation_context}
 
 Requirement ปัจจุบัน:
-{json.dumps(requirements or {}, ensure_ascii=False)}
+{json.dumps(clean_requirements or {}, ensure_ascii=False)}
 {matched_info} 
 
 ข้อมูลที่ต้องถามเพิ่มตอนนี้คือ: {label}

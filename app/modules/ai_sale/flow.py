@@ -98,7 +98,7 @@ async def process_ai_sale_stream(req, state):
             
             # 1. เรียกใช้งานฟังก์ชัน (จะได้ค่าเป็น "ชื่อหลักสูตร" หรือ "")
             topic_check_courses, course_id = await check_topic_exists_in_qdrant(
-                new_topic,
+                req,
                 limit=1
             )
 
@@ -128,7 +128,7 @@ async def process_ai_sale_stream(req, state):
                     "role": "assistant",
                     "content": reply
                 })
-
+                state.mode = "post_recommend"
                 yield {
                     "type": "done",
                     "reply": reply,
@@ -197,132 +197,132 @@ async def process_ai_sale_stream(req, state):
             state.requirements = new_requirements
     
 
-    missing = calc_missing_requirements(state.requirements)
+    # missing = calc_missing_requirements(state.requirements)
 
-    state.missing_requirements = missing
-    state.requirement_ready = len(missing) == 0
+    # state.missing_requirements = missing
+    # state.requirement_ready = len(missing) == 0
 
-    if missing:
-        reply = ""
-        print("CALL build_next_question", flush=True)
-        async for item in build_next_question(
-            state.requirements,
-            missing,
-            state.conversation_history
-        ):
-            if item.get("type") == "chunk":
-                text = item.get("text", "")
-                reply += text
-                yield {
-                    "type": "chunk",
-                    "text": text
-                }
+    # if missing:
+    #     reply = ""
+    #     print("CALL build_next_question", flush=True)
+    #     async for item in build_next_question(
+    #         state.requirements,
+    #         missing,
+    #         state.conversation_history
+    #     ):
+    #         if item.get("type") == "chunk":
+    #             text = item.get("text", "")
+    #             reply += text
+    #             yield {
+    #                 "type": "chunk",
+    #                 "text": text
+    #             }
 
-            elif item.get("type") == "done":
-                reply = item.get("content") or reply
+    #         elif item.get("type") == "done":
+    #             reply = item.get("content") or reply
 
-        state.mode = "discovery"
-        state.last_answer = reply
-        state.last_step = "ask_requirement"
+    #     state.mode = "discovery"
+    #     state.last_answer = reply
+    #     state.last_step = "ask_requirement"
 
-        state.conversation_history.append({
-            "role": "assistant",
-            "content": reply
-        })
+    #     state.conversation_history.append({
+    #         "role": "assistant",
+    #         "content": reply
+    #     })
 
-        if len(state.conversation_history) > 10:
-            state.conversation_history = state.conversation_history[-10:]
+    #     if len(state.conversation_history) > 10:
+    #         state.conversation_history = state.conversation_history[-10:]
 
-        yield {
-            "type": "done",
-            "reply": reply,
-            "status": "collecting_requirement",
-            "reason": "missing_requirement",
-            "state": state,
-            "source": "ai_sale_discovery",
-        }
-        return
+    #     yield {
+    #         "type": "done",
+    #         "reply": reply,
+    #         "status": "collecting_requirement",
+    #         "reason": "missing_requirement",
+    #         "state": state,
+    #         "source": "ai_sale_discovery",
+    #     }
+    #     return
 
-    search_query = await build_search_query(state.requirements)
-    state.search_query = search_query
+    # search_query = await build_search_query(state.requirements)
+    # state.search_query = search_query
 
-    # สมมติว่า state.recommended_courses เก็บ course_no ที่แนะนำไปแล้ว
-    excluded_courses = [course['course_no'] for course in state.recommended_courses]
+    # # สมมติว่า state.recommended_courses เก็บ course_no ที่แนะนำไปแล้ว
+    # excluded_courses = [course['course_no'] for course in state.recommended_courses]
 
-    # ค้นหาหลักสูตรที่ไม่ซ้ำกับที่แนะนำไปแล้ว
-    courses = await search_courses_from_qdrant(search_query, limit=1, excluded_courses=excluded_courses)
+    # # ค้นหาหลักสูตรที่ไม่ซ้ำกับที่แนะนำไปแล้ว
+    # courses = await search_courses_from_qdrant(search_query, limit=1, excluded_courses=excluded_courses)
 
-    # courses = await search_courses_from_qdrant(search_query, limit=3)
-    state.recommended_courses = courses
+    # # courses = await search_courses_from_qdrant(search_query, limit=3)
+    # state.recommended_courses = courses
 
-    course_cta = []
+    # course_cta = []
 
-    for c in courses:
-        payload = c.get("payload") or c
+    # for c in courses:
+    #     payload = c.get("payload") or c
 
-        course_no = (
-            payload.get("course_no")
-            or payload.get("OCourse_no")
-            or payload.get("id")
-        )
+    #     course_no = (
+    #         payload.get("course_no")
+    #         or payload.get("OCourse_no")
+    #         or payload.get("id")
+    #     )
 
-        course_name = (
-            payload.get("course_name")
-            or payload.get("vdo_name")
-            or payload.get("Course_name")
-            or payload.get("title")
-        )
+    #     course_name = (
+    #         payload.get("course_name")
+    #         or payload.get("vdo_name")
+    #         or payload.get("Course_name")
+    #         or payload.get("title")
+    #     )
 
-        if course_no and course_name:
-            course_cta.append({
-                "course_no": course_no,
-                "course_name": course_name,
-            })
+    #     if course_no and course_name:
+    #         course_cta.append({
+    #             "course_no": course_no,
+    #             "course_name": course_name,
+    #         })
 
-    reply = ""
+    # reply = ""
 
-    # ✅ เลือก function ตาม intent
-    if state.last_step == "ask_more_courses":
-        reply_builder = build_more_courses_reply
-    else:
-        reply_builder = build_recommendation_reply
+    # # ✅ เลือก function ตาม intent
+    # if state.last_step == "ask_more_courses":
+    #     reply_builder = build_more_courses_reply
+    # else:
+    #     reply_builder = build_recommendation_reply
 
-    reply = ""
+    # reply = ""
 
-    async for item in reply_builder(
-        requirements=state.requirements,
-        courses=courses
-    ):
+    # async for item in reply_builder(
+    #     requirements=state.requirements,
+    #     courses=courses
+    # ):
         
-        if item.get("type") == "chunk":
-            text = item.get("text", "")
-            reply += text
-            yield {
-                "type": "chunk",
-                "text": text
-            }
+    #     if item.get("type") == "chunk":
+    #         text = item.get("text", "")
+    #         reply += text
+    #         yield {
+    #             "type": "chunk",
+    #             "text": text
+    #         }
 
-        elif item.get("type") == "done":
-            reply = item.get("content") or reply
+    #     elif item.get("type") == "done":
+    #         reply = item.get("content") or reply
 
-    state.mode = "post_recommend"
-    state.last_answer = reply
-    state.last_step = "recommend_course"
-    state.recommended_course_cta = course_cta
+    # state.mode = "post_recommend"
+    # state.last_answer = reply
+    # state.last_step = "recommend_course"
+    # state.recommended_course_cta = course_cta
 
-    state.conversation_history.append({
-        "role": "assistant",
-        "content": reply
-    })
+    # state.conversation_history.append({
+    #     "role": "assistant",
+    #     "content": reply
+    # })
 
-    if len(state.conversation_history) > 10:
-        state.conversation_history = state.conversation_history[-10:]
+    # if len(state.conversation_history) > 10:
+    #     state.conversation_history = state.conversation_history[-10:]
 
-    yield {
-        "type": "done",
-        "reply": reply,
-        "status": "recommended",
-        "reason": "requirement_complete",
-        "state": state,
-        "source": "ai_sale_qdrant",
-    }
+    # yield {
+    #     "type": "done",
+    #     "reply": reply,
+    #     "status": "recommended",
+    #     "reason": "requirement_complete",
+    #     "state": state,
+    #     "source": "ai_sale_qdrant",
+    # }
