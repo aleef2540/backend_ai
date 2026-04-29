@@ -24,6 +24,7 @@ class AISaleState(BaseModel):
 class AISaleRequest(BaseModel):
     chat_id: str = Field(..., min_length=1, max_length=36)
     user_message: str = Field(..., min_length=1)
+    from_web: str = Field(..., min_length=1)
 
 class AISaleResetRequest(BaseModel):
     chat_id: str = Field(..., min_length=1, max_length=36)
