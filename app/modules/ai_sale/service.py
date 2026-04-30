@@ -5,13 +5,14 @@ from app.shared.ai.openai_client import call_openai_chat_full, call_openai_chat_
 REQUIRED_FIELDS = [
     "topic",
     "pain_point",
-    "target_group",
+   
 ]
 
 OPTIONAL_FIELDS = [
     "competency",
     "budget",
         "development_goal",
+         "target_group",
 ]
 
 FIELD_LABELS = {
@@ -552,7 +553,7 @@ Requirement ปัจจุบัน:
 หน้าที่ของคุณคือ:
 1. สะท้อนความเข้าใจในสิ่งที่ลูกค้าต้องการ
 2. แจ้งชื่อหลักสูตรที่ใกล้เคียงกับสิ่งที่ลูกค้าสนใจ (ถ้ามีข้อมูล matched_course)
-3. ถามข้อมูลที่ขาดอยู่ 1 ข้ออย่างเป็นธรรมชาติ
+3. ถามข้อมูลที่ขาดอยู่ 1 ข้ออย่างเป็นธรรมชาติเพื่อให้แนะนำหลักสูตรได้ตรงจุดยิ่งขึ้น
 
 บุคลิก: มืออาชีพ, อบอุ่น, ไม่ถามเหมือนบอท, ห้ามลิสต์ทุกอย่างที่ขาด ไม่ค้องทักทายแล้วนี่เป็นบทสนมนาต่อเนื่อง
 """.strip()

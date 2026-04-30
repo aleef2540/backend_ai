@@ -13,12 +13,30 @@ from app.modules.ai_sale.service import (
 from app.modules.ai_sale.qdrant_service import search_courses_from_qdrant, check_topic_exists_in_qdrant
 import json
 
+def get_course_payload(course):
+    if isinstance(course, dict):
+        payload = course.get("payload") or course
+        return payload if isinstance(payload, dict) else {}
+
+    return {}
+
+
+def get_course_id(course):
+    payload = get_course_payload(course)
+
+    return (
+        payload.get("course_no")
+        or payload.get("OCourse_no")
+        or payload.get("id")
+    )
+
 async def process_ai_sale_stream(req, state):
     if state is None:
         state = AISaleState()
 
     user_message = (req.user_message or "").strip()
     from_web = (req.from_web or "").strip()
+
     state.last_user_message = user_message
     state.from_web = from_web
 
@@ -30,8 +48,8 @@ async def process_ai_sale_stream(req, state):
     if len(state.conversation_history) > 10:
         state.conversation_history = state.conversation_history[-10:]
 
-    # ✅ ใส่ตรงนี้
     skip_extract = False
+
     if state.mode == "post_recommend":
         post_intent = await detect_post_recommend_intent(
             user_message=user_message,
@@ -42,9 +60,10 @@ async def process_ai_sale_stream(req, state):
         print("POST RECOMMEND INTENT =", post_intent, flush=True)
         print("STATE MODE =", state.mode, flush=True)
 
-        state.last_step = post_intent.get("intent", "unclear")
+        intent = post_intent.get("intent", "unclear")
+        state.last_step = intent
 
-        if post_intent["intent"] == "new_requirement":
+        if intent == "new_requirement":
             state.requirements = {}
             state.missing_requirements = []
             state.requirement_ready = False
@@ -53,164 +72,426 @@ async def process_ai_sale_stream(req, state):
             state.recommended_course_cta = []
             state.mode = "discovery"
 
-            # ✅ สำคัญมาก: ล้าง history เก่า เหลือเฉพาะข้อความล่าสุด
             state.conversation_history = [{
                 "role": "user",
                 "content": user_message
             }]
 
-        elif post_intent["intent"] == "ask_more_courses":
+        elif intent == "ask_more_courses":
             skip_extract = True
             state.mode = "discovery"
             state.last_step = "ask_more_courses"
 
-        elif post_intent["intent"] == "refine_requirement":
+        elif intent == "refine_requirement":
             state.mode = "discovery"
 
         else:
             state.mode = "discovery"
 
-    # 👇 แล้วค่อย extract
     if not skip_extract:
         old_requirements = dict(state.requirements or {})
-        old_topic = old_requirements.get("topic")
+
+        old_req = " ".join(
+            str(v).strip()
+            for k, v in sorted(old_requirements.items())
+            if k != "matched_course" and v
+        ).strip()
 
         new_requirements = await extract_requirements(
             user_message=user_message,
             current_requirements=state.requirements or {},
             conversation_history=state.conversation_history
         )
-        state.requirements = new_requirements
-        req = json.dumps(new_requirements or {}, ensure_ascii=False)
 
-        req = " ".join(
-            str(v)
-            for k, v in (new_requirements or {}).items()
-            if k != "matched_course"
+        new_req = " ".join(
+            str(v).strip()
+            for k, v in sorted((new_requirements or {}).items())
+            if k != "matched_course" and v
         ).strip()
-        
+
+        state.requirements = new_requirements
+
         new_topic = new_requirements.get("topic")
-        new_topic_norm = (new_topic or "").strip()
-        old_topic_norm = (old_topic or "").strip()
+        old_topic = old_requirements.get("topic")
 
-        print(f"TOPIC CHECK | new topic={new_topic_norm} | old topic={old_topic_norm} | req={req}", flush=True)
+        print(
+            f"REQ CHECK | old_req={old_req} | new_req={new_req}",
+            flush=True
+        )
 
-        # if new_topic and new_topic_norm != old_topic_norm:
-        if True:
-            
-            if not req:
-                    reply = "อยากให้ช่วยพัฒนาทักษะด้านไหนเป็นพิเศษครับ"
+        topic_check_courses = None
+        course_id = None
 
-                    yield {
-                        "type": "done",
-                        "reply": reply,
-                        "status": "collecting_requirement",
-                        "reason": "missing_topic",
-                        "state": state,
-                    }
-                    return
-            else:
-                 # 1. เรียกใช้งานฟังก์ชัน (จะได้ค่าเป็น "ชื่อหลักสูตร" หรือ "")
-                topic_check_courses, course_id = await check_topic_exists_in_qdrant(
-                    req,
-                    limit=1
-                )
+        missing = calc_missing_requirements(state.requirements)
+        state.missing_requirements = missing
+        state.requirement_ready = len(missing) == 0
 
-           
-
-            # 2. เช็คกรณี "หาหัวข้อไม่เจอ" และเป็น "หัวข้อใหม่ที่ไม่มีบริบทเก่า"
-            # ใช้ if not topic_check_courses ได้เลย (เพราะ "" คือ False)
-            if new_topic and not topic_check_courses and not old_topic:
+        if not new_req:
+            if missing:
                 reply = ""
 
-                
-                async for item in build_irrelevant_topic_reply(
-                    user_message=user_message,
-                    old_topic=old_topic,
-                    conversation_history=state.conversation_history
+                print("CALL build_next_question", flush=True)
+
+                async for item in build_next_question(
+                    state.requirements,
+                    missing,
+                    state.conversation_history
                 ):
                     if item.get("type") == "chunk":
                         text = item.get("text", "")
                         reply += text
-                        yield {"type": "chunk", "text": text}
+                        yield {
+                            "type": "chunk",
+                            "text": text
+                        }
 
                     elif item.get("type") == "done":
                         reply = item.get("content") or reply
 
-                state.last_answer = reply
-                state.last_step = "irrelevant_topic"
-
-                state.conversation_history.append({
-                    "role": "assistant",
-                    "content": reply
-                })
-                state.mode = "post_recommend"
-                yield {
-                    "type": "done",
-                    "reply": reply,
-                    "status": "irrelevant",
-                    "reason": "topic_not_found",
-                    "state": state,
-                }
-                return
-
-            # 3. กรณีที่เจอหลักสูตรที่เกี่ยวข้อง (Score ผ่านเกณฑ์)
-            # ... ภายใน Logic หลักของคุณ ...
-
-            if topic_check_courses:
-                state.requirements = new_requirements
-                # ✅ เก็บ topic เดิมของ user
-                state.requirements["topic"] = new_topic
-
-                # ✅ แยกเก็บ course ที่ match
-                state.requirements["matched_course"] = topic_check_courses
-
-                reply = ""
-                print("CALL build_next_question_topic", flush=True)
-                async for item in build_next_question_topic(
-                    requirements=state.requirements,
-                    missing=calc_missing_requirements(state.requirements),
-                    conversation_history=state.conversation_history,
-                    matched_course=state.requirements.get("matched_course")
-                ):
-                    if item.get("type") == "chunk":
-                        text = item.get("text", "")
-                        reply += text
-                        yield {"type": "chunk", "text": text}
-                    elif item.get("type") == "done":
-                        reply = item.get("content") or reply
-
-                state.last_answer = reply
-                state.matched_course = state.requirements["matched_course"]
-                state.matched_course_id = course_id
-                state.last_step = "ask_requirement_topic"
                 state.mode = "discovery"
+                state.last_answer = reply
+                state.last_step = "ask_requirement"
 
                 state.conversation_history.append({
                     "role": "assistant",
                     "content": reply
                 })
+
+                if len(state.conversation_history) > 10:
+                    state.conversation_history = state.conversation_history[-10:]
 
                 yield {
                     "type": "done",
                     "reply": reply,
                     "status": "collecting_requirement",
-                    "reason": "matched_topic_need_more_info",
+                    "reason": "missing_requirement",
                     "state": state,
                     "source": "ai_sale_discovery",
                 }
                 return
 
-            # 4. กรณีที่ไม่เจอหลักสูตรใหม่ แต่มีหัวข้อเก่า (Old Topic) ให้ประคองไว้
-            else:
-                if old_topic:
-                    new_requirements["topic"] = old_topic
+            state.mode = "post_recommend"
 
-                state.requirements = new_requirements
-                print(f"KEEP OLD TOPIC: {old_topic}", flush=True)
+        if new_req and new_req != old_req:
+            topic_check_courses, course_id = await check_topic_exists_in_qdrant(
+                new_req,
+                limit=1
+            )
 
-        else:
+        elif new_req and old_req and new_req == old_req:
+            topic_check_courses = state.requirements.get("matched_course")
+            course_id = getattr(state, "matched_course_id", None)
+
+        if new_req and new_topic and not topic_check_courses and not old_topic:
+            reply = ""
+
+            async for item in build_irrelevant_topic_reply(
+                user_message=user_message,
+                old_topic=old_topic,
+                conversation_history=state.conversation_history
+            ):
+                if item.get("type") == "chunk":
+                    text = item.get("text", "")
+                    reply += text
+                    yield {
+                        "type": "chunk",
+                        "text": text
+                    }
+
+                elif item.get("type") == "done":
+                    reply = item.get("content") or reply
+
+            state.last_answer = reply
+            state.last_step = "irrelevant_topic"
+
+            state.conversation_history.append({
+                "role": "assistant",
+                "content": reply
+            })
+
+            state.mode = "post_recommend"
+
+            yield {
+                "type": "done",
+                "reply": reply,
+                "status": "irrelevant",
+                "reason": "topic_not_found",
+                "state": state,
+            }
+            return
+
+        if topic_check_courses:
             state.requirements = new_requirements
+            state.requirements["topic"] = new_topic
+            state.requirements["matched_course"] = topic_check_courses
+
+            missing = calc_missing_requirements(state.requirements)
+            state.missing_requirements = missing
+            state.requirement_ready = len(missing) == 0
+
+            reply = ""
+
+            print("CALL build_next_question_topic", flush=True)
+
+            async for item in build_next_question_topic(
+                requirements=state.requirements,
+                missing=missing,
+                conversation_history=state.conversation_history,
+                matched_course=state.requirements.get("matched_course")
+            ):
+                if item.get("type") == "chunk":
+                    text = item.get("text", "")
+                    reply += text
+                    yield {
+                        "type": "chunk",
+                        "text": text
+                    }
+
+                elif item.get("type") == "done":
+                    reply = item.get("content") or reply
+
+            state.last_answer = reply
+            state.matched_course = state.requirements["matched_course"]
+            state.matched_course_id = course_id
+            state.last_step = "ask_requirement_topic"
+
+            # ✅ เก็บ course ที่ match แล้ว กันซ้ำตอน user ขอ course เพิ่ม
+            old_courses = state.recommended_courses or []
+
+            exists_ids = set()
+            for course in old_courses:
+                payload = get_course_payload(course)
+
+                if not payload:
+                    continue
+
+                cid = (
+                    payload.get("course_no")
+                    or payload.get("OCourse_no")
+                    or payload.get("id")
+                )
+
+                if cid:
+                    exists_ids.add(str(cid))
+
+            # ✅ normalize payload ให้เป็น dict เสมอ
+            if isinstance(topic_check_courses, dict):
+                matched_payload = topic_check_courses.get("payload") or topic_check_courses
+            else:
+                matched_payload = {}
+
+            matched_course_id = None
+
+            if isinstance(matched_payload, dict):
+                matched_course_id = (
+                    matched_payload.get("course_no")
+                    or matched_payload.get("OCourse_no")
+                    or matched_payload.get("id")
+                    or course_id
+                )
+            else:
+                matched_course_id = course_id
+
+            if matched_payload is None:
+                matched_payload = topic_check_courses
+
+            matched_course_id = (
+                matched_payload.get("course_no")
+                or matched_payload.get("OCourse_no")
+                or matched_payload.get("id")
+                or course_id
+            )
+
+            if matched_course_id and str(matched_course_id) not in exists_ids:
+                state.recommended_courses = old_courses + [topic_check_courses]
+            else:
+                state.recommended_courses = old_courses
+
+            if not missing:
+                state.mode = "post_recommend"
+                status = "ready_to_recommend"
+                reason = "requirement_complete"
+            else:
+                state.mode = "discovery"
+                status = "collecting_requirement"
+                reason = "matched_topic_need_more_info"
+
+            state.conversation_history.append({
+                "role": "assistant",
+                "content": reply
+            })
+
+            if len(state.conversation_history) > 10:
+                state.conversation_history = state.conversation_history[-10:]
+
+            yield {
+                "type": "done",
+                "reply": reply,
+                "status": status,
+                "reason": reason,
+                "state": state,
+                "source": "ai_sale_discovery",
+            }
+            return
+
+        if old_topic:
+            new_requirements["topic"] = old_topic
+            state.requirements = new_requirements
+            print(f"KEEP OLD TOPIC: {old_topic}", flush=True)
+
+    else:
+        # ✅ กรณีลูกค้าขอ course เพิ่ม / course ใกล้เคียงของเดิม
+        search_query = await build_search_query(state.requirements)
+        state.search_query = search_query
+
+        excluded_courses = []
+
+        for course in state.recommended_courses or []:
+            course_no = get_course_id(course)
+
+            if course_no:
+                excluded_courses.append(str(course_no))
+
+        courses = await search_courses_from_qdrant(
+            search_query,
+            limit=1,
+            excluded_courses=excluded_courses
+        )
+
+        # ✅ อัปเดต matched_course เป็น course ใหม่
+        if courses:
+            first_course = courses[0]
+            payload = get_course_payload(first_course)
+
+            if payload:
+                new_course_id = (
+                    payload.get("course_no")
+                    or payload.get("OCourse_no")
+                    or payload.get("id")
+                )
+
+                new_course_name = (
+                    payload.get("course_name")
+                    or payload.get("vdo_name")
+                    or payload.get("Course_name")
+                    or payload.get("title")
+                )
+
+                state.matched_course = new_course_name
+                state.matched_course_id = new_course_id
+
+                if state.requirements is None:
+                    state.requirements = {}
+
+                state.requirements["matched_course"] = new_course_name
+
+        # ✅ เก็บ courses แบบไม่ซ้ำ
+        old_courses = state.recommended_courses or []
+        merged_courses = []
+        seen_course_ids = set()
+
+        for course in old_courses + courses:
+            course_no = get_course_id(course)
+
+            if course_no:
+                key = str(course_no)
+                if key in seen_course_ids:
+                    continue
+                seen_course_ids.add(key)
+
+            merged_courses.append(course)
+
+        state.recommended_courses = merged_courses
+
+        course_cta = []
+
+        for c in courses:
+            payload = get_course_payload(c)
+
+            if not payload:
+                continue
+
+            course_no = (
+                payload.get("course_no")
+                or payload.get("OCourse_no")
+                or payload.get("id")
+            )
+
+            course_name = (
+                payload.get("course_name")
+                or payload.get("vdo_name")
+                or payload.get("Course_name")
+                or payload.get("title")
+            )
+
+            if course_no and course_name:
+                course_cta.append({
+                    "course_no": course_no,
+                    "course_name": course_name,
+                })
+
+        reply = ""
+
+        async for item in build_more_courses_reply(
+            requirements=state.requirements,
+            courses=courses
+        ):
+            if item.get("type") == "chunk":
+                text = item.get("text", "")
+                reply += text
+                yield {
+                    "type": "chunk",
+                    "text": text
+                }
+
+            elif item.get("type") == "done":
+                reply = item.get("content") or reply
+
+        state.mode = "post_recommend"
+        state.last_answer = reply
+        state.last_step = "ask_more_courses"
+
+        old_cta = state.recommended_course_cta or []
+        merged_cta = []
+        seen = set()
+
+        for c in old_cta + course_cta:
+            course_no = c.get("course_no")
+
+            if not course_no:
+                continue
+
+            course_no_key = str(course_no)
+
+            if course_no_key in seen:
+                continue
+
+            seen.add(course_no_key)
+
+            merged_cta.append({
+                "course_no": course_no,
+                "course_name": c.get("course_name", "")
+            })
+
+        state.recommended_course_cta = merged_cta
+
+        state.conversation_history.append({
+            "role": "assistant",
+            "content": reply
+        })
+
+        if len(state.conversation_history) > 10:
+            state.conversation_history = state.conversation_history[-10:]
+
+        yield {
+            "type": "done",
+            "reply": reply,
+            "status": "recommended",
+            "reason": "ask_more_courses",
+            "state": state,
+            "source": "ai_sale_qdrant",
+        }
+        return
     
 
     # missing = calc_missing_requirements(state.requirements)
