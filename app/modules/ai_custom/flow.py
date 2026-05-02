@@ -272,6 +272,35 @@ async def process_chat_aicustom_stream(req, state):
     if len(state.conversation_history) > 10:
         state.conversation_history = state.conversation_history[-10:]
 
+    if state.mode == "feedback":
+        reply = (
+            "⚠️ โหมด feedback กำลังพัฒนาอยู่ครับ\n\n"
+            f"(debug) state.mode = {state.mode}"
+        )
+
+        print("[FEEDBACK DEBUG] skip logic", flush=True)
+
+        # ❌ ไม่แก้ state ใด ๆ ทั้งสิ้น
+        # ❌ ไม่ append conversation_history
+        # ❌ ไม่เปลี่ยน mode
+
+        yield {
+            "type": "chunk",
+            "text": reply
+        }
+
+        yield {
+            "type": "done",
+            "reply": reply,
+            "state": None,  # 🔥 สำคัญ: ไม่ส่ง state กลับไป
+            "source": "ai_custom",
+            "status": "debug_feedback_skip",
+            "reason": "skip_feedback_logic",
+            "active_video": None
+        }
+
+        return
+
     # =========================
     # 2) Extract requirement ก่อน
     # =========================
@@ -747,7 +776,7 @@ RAG_CONTEXT:
         elif item["type"] == "done":
             final_reply = item.get("content", final_reply)
 
-    state.mode = "learning"
+    state.mode = "feedback"
     state.topic = topic
     state.active_course_no = best.get("course_no")
     state.last_answer = final_reply
