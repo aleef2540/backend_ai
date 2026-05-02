@@ -16,7 +16,6 @@ import random
 
 
 
-
 def build_video_payload(video):
     if not video:
         return None
@@ -179,46 +178,6 @@ def build_summary_message(user_message: str, state) -> str:
     )
 
 
-def load_allowed_course_context(course_use):
-    """Load allowed course names from course_no list for discovery replies."""
-    if not course_use:
-        return [], ""
-
-    try:
-        course_data = get_course_data_by_nos_bridge(course_use) or []
-    except Exception as e:
-        print("[AI_CUSTOM] LOAD COURSE DATA ERROR", repr(e), flush=True)
-        return [], ""
-
-    course_name_context = build_course_name_context(course_data)
-    return course_data, course_name_context
-
-
-def build_discovery_message_with_course_context(user_message: str, requirements, missing, course_name_context: str) -> str:
-    return f"""
-ข้อความผู้เรียน:
-{user_message}
-
-Requirement ปัจจุบัน:
-{json.dumps(requirements or {}, ensure_ascii=False)}
-
-Requirement ที่ยังขาด:
-{json.dumps(missing or [], ensure_ascii=False)}
-
-หลักสูตร/หัวข้อที่ระบบอนุญาตให้ใช้เป็นความรู้:
-{course_name_context or ""}
-
-คำสั่ง:
-- ผู้เรียนยังไม่ได้ระบุ content/topic ที่ชัดเจน หรือยังมี requirement ที่ต้องเก็บเพิ่ม
-- ห้ามตอบว่าระบบไม่มีข้อมูลหลักสูตร ถ้ามีรายชื่อหลักสูตรด้านบน
-- ให้ทักทายหรือรับข้อความของผู้เรียนอย่างเป็นธรรมชาติ
-- บอกแบบสั้น ๆ ว่าคุณช่วยเรื่องอะไรได้บ้างจากรายชื่อหลักสูตรด้านบน โดยยกตัวอย่างไม่เกิน 3-5 รายการ
-- อย่าลิสต์ยาวเกินไป
-- ปิดท้ายด้วยคำถาม 1 คำถาม เพื่อถามว่าอยากเรียนหรือพัฒนาเรื่องไหนเป็นพิเศษ
-- ตอบภาษาไทย สุภาพ กระชับ
-""".strip()
-
-
 async def process_chat_aicustom_stream(req, state):
     if state is None:
         state = ChatState_aicustom()
@@ -248,15 +207,6 @@ async def process_chat_aicustom_stream(req, state):
         return
 
     # =========================
-    # 0) โหลดรายชื่อ course ที่อนุญาตจาก course_no
-    #    ใช้เป็น context ตอนผู้เรียนยังไม่ได้บอก content/topic
-    #    ไม่ใช่การค้น RAG และไม่ควรใช้แทน RAG เมื่อต้องตอบเนื้อหาเชิงลึก
-    # =========================
-    course_data, course_name_context = load_allowed_course_context(course_use)
-    state.allowed_course_data = course_data
-    state.allowed_course_name_context = course_name_context
-
-    # =========================
     # 1) เก็บ conversation history
     # =========================
     if not hasattr(state, "conversation_history") or state.conversation_history is None:
@@ -283,70 +233,19 @@ async def process_chat_aicustom_stream(req, state):
         conversation_history=state.conversation_history
     )
 
-    old_req = " ".join(
-    str(v).strip()
-    for k, v in sorted((old_requirements or {}).items())
-    if k not in ["matched_course"] and v
-    ).strip()
-
-    new_req = " ".join(
-        str(v).strip()
-        for k, v in sorted((new_requirements or {}).items())
-        if k not in ["matched_course"] and v
-    ).strip()
-
     old_content = str(old_requirements.get("content") or "").strip()
     new_content = str((new_requirements or {}).get("content") or "").strip()
-    print(f"req : {new_requirements}", flush=True)
-
-    print(
-        f"REQ CHECK | old_req={old_req} | new_req={new_req}",
-        flush=True
-    )
-
-    req_changed = (
-        old_req
-        and new_req
-        and old_req.lower() != new_req.lower()
-    )
-
-    req_same = (
-        old_req
-        and new_req
-        and old_req.lower() == new_req.lower()
-    )
-
-    has_cached_rag = bool(getattr(state, "matched_rag_results", None))
-
-    if req_changed:
-        print(f"[AI_CUSTOM] REQUIREMENT CHANGED: {old_req} -> {new_req}", flush=True)
-
-        state.requirements = new_requirements or {}
-        state.matched_rag_results = []
-        state.active_course_no = None
-        state.topic = new_content or getattr(state, "topic", "unknown")
-        has_cached_rag = False
-    else:
-        state.requirements = new_requirements or {}
 
     print(
             f"REQ CHECK | old_content={old_content} | new_content={new_content}",
             flush=True
         )
-
+    
     topic_changed = (
         old_content
         and new_content
         and old_content.lower() != new_content.lower()
     )
-
-    topic_same = (
-        old_content
-        and new_content
-        and old_content.lower() == new_content.lower()
-    )
-
-    has_cached_rag = bool(getattr(state, "matched_rag_results", None))
 
     if topic_changed:
         print(f"[AI_CUSTOM] TOPIC CHANGED: {old_content} -> {new_content}", flush=True)
@@ -359,7 +258,6 @@ async def process_chat_aicustom_stream(req, state):
         state.matched_rag_results = []
         state.active_course_no = None
         state.topic = new_content
-        has_cached_rag = False
     else:
         state.requirements = new_requirements or {}
 
@@ -373,152 +271,47 @@ async def process_chat_aicustom_stream(req, state):
         if v
     ).strip()
 
-    # =========================
-    # 3) ตัดสินใจก่อนว่าจะ search RAG ไหม
-    #    - content เดิม + มี cache => ใช้ข้อมูลเดิม ไม่ search
-    #    - ยังไม่มี content / requirement ยังขาด + ไม่มี cache => ถาม requirement ต่อ ไม่ search
-    #    - content ใหม่ / ยังไม่เคยมี cache => ค่อย search
-    # =========================
-    should_search_rag = False
+    # ✅ ให้ user_message นำหน้าเสมอ กันติด topic เก่า
+    search_text = f"{user_message} {req_text}".strip()
 
-    if req_changed:
-        should_search_rag = True
-    elif new_req and not has_cached_rag:
-        should_search_rag = True
-    elif req_same and has_cached_rag:
-        should_search_rag = False
-    elif not new_req:
-        should_search_rag = False
+    try:
+        rag_results = search_rag(
+            user_message=search_text,
+            course_nos=course_use,
+            limit=5,
+            score_threshold=0.20,
+        )
+    except Exception as e:
+        print("[STREAM RAG ERROR TYPE]", type(e), flush=True)
+        print("[STREAM RAG ERROR REPR]", repr(e), flush=True)
 
-    print(
-        f"RAG DECISION | req_changed={req_changed} | req_same={req_same} | "
-        f"has_cached_rag={has_cached_rag} | missing={missing} | should_search_rag={should_search_rag}",
-        flush=True
-    )
+        reply = "ระบบค้นหาเนื้อหาขัดข้องชั่วคราวครับ"
 
-    rag_results = list(getattr(state, "matched_rag_results", []) or [])
-
-    if should_search_rag:
-        search_text = req_text
-
-        try:
-            rag_results = search_rag(
-                user_message=search_text,
-                course_nos=course_use,
-                limit=5,
-                score_threshold=0.20,
-            )
-        except Exception as e:
-            print("[STREAM RAG ERROR TYPE]", type(e), flush=True)
-            print("[STREAM RAG ERROR REPR]", repr(e), flush=True)
-
-            reply = "ระบบค้นหาเนื้อหาขัดข้องชั่วคราวครับ"
-
-            yield {"type": "chunk", "text": reply}
-            yield {
-                "type": "done",
-                "reply": reply,
-                "status": "error",
-                "reason": "rag_exception",
-                "state": state,
-                "source": "qdrant_rag",
-                "active_video": None,
-            }
-            return
-
-        # state.matched_rag_results = rag_results or []
-    else:
-        rag_results = list(getattr(state, "matched_rag_results", []) or [])
-
-    best = rag_results[0] if rag_results else None
-    best_score = best.get("score") if best else 0
-
-    if missing and not best:
-        reply = ""
-
-        # ถ้ามีรายชื่อ course ที่อนุญาต ให้ใช้เป็น hint ตอนถามหา content
-        # เช่น user พิมพ์ "สวัสดี" แล้ว AI ควรบอกได้เล็กน้อยว่ามีความรู้เรื่องอะไรบ้าง
-        if course_name_context:
-            discovery_message = build_discovery_message_with_course_context(
-                user_message=user_message,
-                requirements=state.requirements,
-                missing=missing,
-                course_name_context=course_name_context,
-            )
-
-            async for item in reply_ask_concept_with_topic_stream(
-                discovery_message,
-                "หัวข้อที่เปิดให้เรียน",
-                course_name_context,
-            ):
-                if item.get("type") == "chunk":
-                    text = item.get("text", "")
-                    reply += text
-                    yield {"type": "chunk", "text": text}
-
-                elif item.get("type") == "done":
-                    reply = item.get("content") or reply
-
-            answer_type = "ask_requirement_with_allowed_courses"
-            source = "ai_custom_discovery_course_context"
-        else:
-            async for item in build_next_question(
-                state.requirements,
-                missing,
-                state.conversation_history
-            ):
-                if item.get("type") == "chunk":
-                    text = item.get("text", "")
-                    reply += text
-                    yield {"type": "chunk", "text": text}
-
-                elif item.get("type") == "done":
-                    reply = item.get("content") or reply
-
-            answer_type = "ask_requirement_without_rag"
-            source = "ai_custom_discovery"
-
-        state.mode = "discovery"
-        state.last_answer = reply
-        state.last_intent = "collect_requirement"
-        state.last_answer_type = answer_type
-
-        state.conversation_history.append({
-            "role": "assistant",
-            "content": reply
-        })
-
-        if len(state.conversation_history) > 10:
-            state.conversation_history = state.conversation_history[-10:]
-
+        yield {"type": "chunk", "text": reply}
         yield {
             "type": "done",
             "reply": reply,
-            "status": "collecting_requirement",
-            "reason": "missing_requirement_no_rag_search",
+            "status": "error",
+            "reason": "rag_exception",
             "state": state,
-            "source": source,
+            "source": "qdrant_rag",
             "active_video": None,
         }
         return
 
-    if should_search_rag and (not best or best_score < 0.35):
+    state.matched_rag_results = rag_results or []
 
-        print("[AI_CUSTOM] RAG NOT RELATED - ROLLBACK REQUIREMENTS", flush=True)
+    best = rag_results[0] if rag_results else None
+    best_score = best.get("score") if best else 0
 
-        state.requirements = old_requirements or {}
-        state.missing_requirements = calc_missing_requirements(state.requirements)
-        state.requirement_ready = len(state.missing_requirements) == 0
-        state.matched_rag_results = []
-        state.active_course_no = None
-        state.topic = str((old_requirements or {}).get("content") or "unknown")
+    # ✅ ด่านไม่เกี่ยวข้อง เหมือน AI Sale
+    if not best or best_score < 0.42:
         reply = ""
 
         async for item in build_irrelevant_content_reply(
             user_message=user_message,
             requirements=state.requirements,
-            conversation_history=state.conversation_history,
-            course_name_context=course_name_context,
+            conversation_history=state.conversation_history
         ):
             if item.get("type") == "chunk":
                 text = item.get("text", "")
@@ -551,13 +344,9 @@ async def process_chat_aicustom_stream(req, state):
             "active_video": None,
         }
         return
-        # ✅ ผ่านด่าน relevance แล้ว ค่อยเก็บ RAG cache
-    if should_search_rag:
-        state.matched_rag_results = rag_results or []
 
-    # ตอบจากข้อมูลพร้อมถามต่อสิ่งที่ขาดอยู่
     if missing:
-        # active_video = build_active_video_from_rag(best) if best else None
+        active_video = build_active_video_from_rag(best) if best else None
 
         matched_topic = (
             best.get("vdo_name")
@@ -588,7 +377,6 @@ RAG_CONTEXT:
 - ตอบจาก RAG_CONTEXT เท่านั้น
 - ถ้าเนื้อหาใน RAG_CONTEXT ตรงกับสิ่งที่ผู้เรียนถาม ให้สรุปคร่าว ๆ 2-4 ประโยค
 - อย่าตอบจัดเต็ม
-- ไม่ต้องบอกว่าตอบจากเนื้อหาอะไร
 - ห้ามดึง topic เก่าที่ไม่เกี่ยวข้องมาตอบ
 - หลังจากสรุปคร่าว ๆ แล้ว ให้ถามต่อ 1 คำถามเท่านั้น เพื่อเก็บ requirement ที่ยังขาด
 """.strip()
@@ -627,51 +415,42 @@ RAG_CONTEXT:
             "status": "collecting_requirement",
             "reason": "rag_brief_answer_then_missing_requirement",
             "state": state,
-            "source": "ai_custom_requirement_rag_cached" if not should_search_rag else "ai_custom_requirement_rag",
-            # "active_video": active_video,
+            "source": "ai_custom_requirement_rag",
+            "active_video": active_video,
         }
         return
 
     # =========================
     # 5) Requirement ครบแล้ว
-    #    ค้นแบบจริงจังเฉพาะตอนจำเป็น
-    #    - ถ้า content เดิมและมี matched_rag_results แล้ว ใช้ cache เดิม
-    #    - ถ้า content ใหม่หรือยังไม่มี cache ค่อย search
+    #    ค่อยค้น Qdrant แบบจริงจัง
     # =========================
-    if req_same and getattr(state, "matched_rag_results", None):
-        rag_results = list(state.matched_rag_results or [])
-        state.search_query = getattr(state, "search_query", None)
-        print("[AI_CUSTOM] USE CACHED RAG FOR COMPLETE REQUIREMENT", flush=True)
-    else:
-        search_query = await build_search_query(state.requirements)
-        state.search_query = search_query
+    search_query = await build_search_query(state.requirements)
+    state.search_query = search_query
 
-        try:
-            rag_results = search_rag(
-                user_message=search_query,
-                course_nos=course_use,
-                limit=5,
-                score_threshold=0.20,
-            )
-        except Exception as e:
-            print("[STREAM RAG ERROR TYPE]", type(e), flush=True)
-            print("[STREAM RAG ERROR REPR]", repr(e), flush=True)
+    try:
+        rag_results = search_rag(
+            user_message=search_query,
+            course_nos=course_use,
+            limit=5,
+            score_threshold=0.20,
+        )
+    except Exception as e:
+        print("[STREAM RAG ERROR TYPE]", type(e), flush=True)
+        print("[STREAM RAG ERROR REPR]", repr(e), flush=True)
 
-            reply = "ระบบค้นหาเนื้อหาขัดข้องชั่วคราวครับ"
+        reply = "ระบบค้นหาเนื้อหาขัดข้องชั่วคราวครับ"
 
-            yield {"type": "chunk", "text": reply}
-            yield {
-                "type": "done",
-                "reply": reply,
-                "status": "error",
-                "reason": "rag_exception_after_requirement_complete",
-                "state": state,
-                "source": "qdrant_rag",
-                "active_video": None,
-            }
-            return
-
-        state.matched_rag_results = rag_results or []
+        yield {"type": "chunk", "text": reply}
+        yield {
+            "type": "done",
+            "reply": reply,
+            "status": "error",
+            "reason": "rag_exception_after_requirement_complete",
+            "state": state,
+            "source": "qdrant_rag",
+            "active_video": None,
+        }
+        return
 
     if not rag_results:
         reply = "ตอนนี้ยังไม่พบเนื้อหาที่ตรงกับสิ่งที่ต้องการในหลักสูตรที่เปิดให้ใช้งานครับ ลองบอกหัวข้อหรือเป้าหมายให้เจาะจงขึ้นอีกนิดได้ไหมครับ"

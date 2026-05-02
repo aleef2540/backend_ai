@@ -20,7 +20,6 @@ def get_course_payload(course):
 
     return {}
 
-
 def get_course_id(course):
     payload = get_course_payload(course)
 

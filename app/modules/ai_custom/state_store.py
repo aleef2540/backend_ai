@@ -1,34 +1,47 @@
+from typing import Optional
 from app.modules.ai_custom.schema import ChatState_aicustom
 
 
 class ChatStateStoreAICustom:
     def __init__(self):
-        self.store = {}
+        self.store: dict[str, ChatState_aicustom] = {}
 
-    def _make_key(self, web_no: int | None, member_no: int | None):
-        return f"{web_no}:{member_no}"
+    def _make_key(self, room_id: Optional[int]) -> str:
+        if room_id is None:
+            raise ValueError("room_id is required for ChatStateStoreAICustom")
 
-    def get_state(self, web_no: int | None, member_no: int | None) -> ChatState_aicustom:
-        key = self._make_key(web_no, member_no)
+        return f"room:{room_id}"
 
-        return self.store.get(
-            key,
-            ChatState_aicustom(
-                web_no=web_no,
-                member_no=member_no,
-            )
-        )
+    def get_state(self, room_id: Optional[int]) -> ChatState_aicustom:
+        key = self._make_key(room_id)
 
-    def set_state(self, web_no: int | None, member_no: int | None, state: ChatState_aicustom):
-        key = self._make_key(web_no, member_no)
+        if key not in self.store:
+            self.store[key] = ChatState_aicustom()
+
+        return self.store[key]
+
+    def set_state(
+        self,
+        room_id: Optional[int],
+        state: ChatState_aicustom,
+    ) -> ChatState_aicustom:
+        key = self._make_key(room_id)
         self.store[key] = state
+        return state
 
-    def reset_state(self, web_no: int | None, member_no: int | None):
-        key = self._make_key(web_no, member_no)
+    def reset_state(
+        self,
+        room_id: Optional[int],
+        web_no: Optional[int] = None,
+        member_no: Optional[int] = None,
+        course_use: Optional[list] = None,
+    ) -> ChatState_aicustom:
+        key = self._make_key(room_id)
 
         state = ChatState_aicustom(
             web_no=web_no,
             member_no=member_no,
+            course_use=course_use or [],
         )
 
         self.store[key] = state

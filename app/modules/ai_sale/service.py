@@ -88,7 +88,7 @@ def build_conversation_context(history: list | None, limit: int = 8) -> str:
 
 async def extract_requirements(
     user_message: str,
-    current_requirements: dict,
+    current_requirements: dict, 
     conversation_history: list | None = None
 ) -> dict:
     conversation_context = build_conversation_context(conversation_history)

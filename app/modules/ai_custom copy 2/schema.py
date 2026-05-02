@@ -1,11 +1,11 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Union
+from typing import Optional, List
 
 
 class ChatState_aicustom(BaseModel):
     web_no: Optional[int] = None
     member_no: Optional[int] = None
-    course_use: List[Union[int, str]] = Field(default_factory=list)
+    course_use: List[int] = Field(default_factory=list)
 
     mode: str = "idle"
     intent: str = "unknown"
@@ -17,43 +17,33 @@ class ChatState_aicustom(BaseModel):
     last_answer_type: Optional[str] = None
     last_user_message: Optional[str] = None
     last_answer: Optional[str] = None
-
-    requirements: dict = Field(default_factory=dict)
-    missing_requirements: list = Field(default_factory=list)
+    
+    requirements: dict = {}
+    missing_requirements: list = []
     requirement_ready: bool = False
-    conversation_history: list = Field(default_factory=list)
-    search_query: Optional[str] = None
-    matched_rag_results: list = Field(default_factory=list)
-
-    allowed_course_data: list = Field(default_factory=list)
+    conversation_history: list = []
+    search_query: str | None = None
+    matched_rag_results: list = []
+    allowed_course_data: list = []
     allowed_course_name_context: Optional[str] = None
 
 
+
 class ChatRequest_aicustom(BaseModel):
-    room_id: Optional[int] = None
-
-
+    user_message: str
     web_no: Optional[int] = None
     member_no: Optional[int] = None
-    user_message: str
-
-    course_use: List[Union[int, str]] = Field(default_factory=list)
-
-    # PHP จะส่ง state_json จาก DB เข้ามา
+    course_use: List[str] = Field(default_factory=list)
     state: Optional[ChatState_aicustom] = None
 
 
 class ChatResponse_aicustom(BaseModel):
-    room_id: Optional[int] = None
     reply: str
     state: Optional[ChatState_aicustom] = None
     source: Optional[str] = None
-    status: Optional[str] = None
-    reason: Optional[str] = None
     active_video: Optional[dict] = None
 
 
 class ResetRequest_aicustom(BaseModel):
-    room_id: int
     web_no: Optional[int] = None
     member_no: Optional[int] = None

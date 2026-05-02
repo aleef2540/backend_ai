@@ -11,20 +11,6 @@ from app.modules.ai_custom.flow import process_chat_aicustom_stream
 
 router = APIRouter(tags=["AI Custom"])
 
-def dump_state_aicustom(state):
-    if state is None:
-        return None
-
-    if hasattr(state, "model_dump"):
-        return state.model_dump()
-
-    if hasattr(state, "dict"):
-        return state.dict()
-
-    if isinstance(state, dict):
-        return state
-
-    return None
 
 @router.post("/chat/ai-custom")
 async def chat_ai_custom_stream(req: ChatRequest_aicustom):
@@ -38,7 +24,7 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
 
     # ถ้า PHP ส่ง state มา ใช้ state จาก DB เป็นหลัก
     # ถ้าไม่ได้ส่งมา ค่อย fallback memory ด้วย room_id
-    if req.state is not None:
+    if req.state:
         state = req.state
     else:
         state = chat_state_store_aicustom.get_state(req.room_id)
@@ -49,11 +35,8 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
     state.web_no = int(req.web_no) if req.web_no not in [None, ""] else None
     state.member_no = int(req.member_no) if req.member_no not in [None, ""] else None
 
-    state.course_use = [
-    str(x).strip()
-    for x in (req.course_use or [])
-    if str(x).strip()
-    ]
+    if req.course_use:
+        state.course_use = [str(x).strip() for x in req.course_use if str(x).strip()]
 
     print(f"[ROUTE] /chat/ai-custom START room_id={req.room_id} {time.time():.3f}", flush=True)
 
@@ -76,12 +59,10 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
                     chunk_count += 1
                     final_reply += text
 
-                    payload = {
+                    yield f"data: {json.dumps({
                         'type': 'chunk',
                         'text': text
-                    }
-                    json_data = json.dumps(payload, ensure_ascii=False)
-                    yield f"data: {json_data}\n\n"
+                    }, ensure_ascii=False)}\n\n"
 
                 elif item_type == "done":
                     final_reply = item.get("reply", final_reply)
@@ -102,7 +83,7 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
                         "type": "done",
                         "room_id": req.room_id,
                         "reply": final_reply,
-                        "state": dump_state_aicustom(final_state),
+                        "state": final_state.model_dump() if hasattr(final_state, "model_dump") else None,
                         "source": final_source,
                         "status": final_status,
                         "reason": final_reason,
@@ -115,15 +96,10 @@ async def chat_ai_custom_stream(req: ChatRequest_aicustom):
         except Exception as e:
             print(f"[STREAM] EXCEPTION {repr(e)}", flush=True)
 
-            # 1. เตรียมข้อมูล Dict
-            payload = {
+            yield f"data: {json.dumps({
                 'type': 'error',
                 'message': str(e)
-            }
-            # 2. แปลงเป็น JSON String
-            json_data = json.dumps(payload, ensure_ascii=False)
-            # 3. ส่งข้อมูล (Yield)
-            yield f"data: {json_data}\n\n"
+            }, ensure_ascii=False)}\n\n"
 
         finally:
             print(
