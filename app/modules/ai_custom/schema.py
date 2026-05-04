@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional, List, Union
 
 
@@ -12,6 +12,8 @@ class ChatState_aicustom(BaseModel):
 
     topic: str = "unknown"
     active_course_no: Optional[int] = None
+
+    journey_name: Optional[str] = None
 
     last_intent: str = "unknown"
     last_answer_type: Optional[str] = None
@@ -27,6 +29,18 @@ class ChatState_aicustom(BaseModel):
 
     allowed_course_data: list = Field(default_factory=list)
     allowed_course_name_context: Optional[str] = None
+
+        # Learning / Feedback phase
+    learning_phase: dict = Field(default_factory=dict)
+    feedback_status: Optional[str] = None
+
+    @field_validator("requirements", "learning_phase", mode="before")
+    @classmethod
+    def normalize_dict_fields(cls, v):
+        if v in [None, "", []]:
+            return {}
+        return v
+
 
 
 class ChatRequest_aicustom(BaseModel):

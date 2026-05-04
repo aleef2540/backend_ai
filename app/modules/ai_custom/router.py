@@ -28,13 +28,25 @@ def dump_state_aicustom(state):
 
 @router.post("/chat/ai-custom")
 async def chat_ai_custom_stream(req: ChatRequest_aicustom):
+    print("[ROUTE BODY]", {
+    "room_id": req.room_id,
+    "web_no": req.web_no,
+    "member_no": req.member_no,
+    "course_use": req.course_use,
+    "user_message": req.user_message,
+    "has_req_state": req.state is not None,
+    }, flush=True)
+    
     if not req.room_id:
         raise HTTPException(status_code=400, detail="room_id is required")
 
+    
     if not req.user_message or not req.user_message.strip():
         raise HTTPException(status_code=400, detail="user_message is required")
 
     req.user_message = req.user_message.strip()
+
+   
 
     # ถ้า PHP ส่ง state มา ใช้ state จาก DB เป็นหลัก
     # ถ้าไม่ได้ส่งมา ค่อย fallback memory ด้วย room_id
