@@ -2,53 +2,25 @@ from app.modules.ai_custom.course_service import get_course_data_by_nos_bridge
 import json
 
 from app.modules.ai_custom.service import (
+    reply_discovery_with_course_context_stream,
     extract_requirements,
     calc_missing_requirements,
     build_next_question,
     build_search_query,
     reply_ask_concept_with_topic_stream,
     build_irrelevant_content_reply,
-    detect_feedback_intent_ai,
-    reply_learning_feedback_stream,
+    build_rag_query_with_llm,
+    filter_rag_results_by_relevance,
+    build_next_question_after_no_rag,
+    reply_ask_concept_with_topic_stream_new,
 
 )
 
+from app.modules.ai_custom.flow_learning_feedback import handle_learning_feedback_flow
+
+
 from app.modules.ai_custom.schema import ChatState_aicustom
 from app.modules.ai_custom.rag_service import search_rag, build_rag_context, build_active_video_from_rag
-import random
-
-LEARNING_INTENTS = {
-    "ask_more",
-    "not_understand",
-    "ask_example",
-    "ask_summary",
-    "ask_how_to_apply",
-    "scenario_question",
-    "related_subtopic",
-    "general_feedback",
-}
-
-FEEDBACK_INTENTS = {
-    "report_done",
-    "report_partial",
-    "report_not_done",
-    "blocked",
-    "review_request",
-}
-
-
-def build_video_payload(video):
-    if not video:
-        return None
-
-    video_url = str(video.get("video_url") or "").strip()
-
-    return {
-        "video_part": video.get("video_part"),
-        "video_name": video.get("video_name"),
-        "video_id": video_url,
-        "embed_url": f"https://www.youtube.com/embed/{video_url}" if video_url else None
-    }
 
 def build_course_name_context(course_data) -> str:
     names = []
@@ -67,47 +39,6 @@ def build_course_name_context(course_data) -> str:
         names.append(course_name)
 
     return ", ".join(names)
-
-
-def find_script_by_topic(course_data, topic: str) -> str:
-    topic_clean = str(topic or "").strip().lower()
-
-    if not topic_clean or topic_clean == "unknown":
-        return ""
-
-    for row in course_data:
-        course_name = str(row.get("course_name") or "").strip()
-        script = str(row.get("script") or "").strip()
-
-        if course_name.lower() == topic_clean:
-            return script
-
-    for row in course_data:
-        course_name = str(row.get("course_name") or "").strip().lower()
-        script = str(row.get("script") or "").strip()
-
-        if topic_clean in course_name or course_name in topic_clean:
-            return script
-
-    return ""
-
-def find_course_by_topic(course_data, topic: str):
-    topic_clean = str(topic or "").strip().lower()
-
-    if not topic_clean or topic_clean == "unknown":
-        return None
-
-    for row in course_data:
-        course_name = str(row.get("course_name") or "").strip()
-        if course_name.lower() == topic_clean:
-            return row
-
-    for row in course_data:
-        course_name = str(row.get("course_name") or "").strip().lower()
-        if topic_clean in course_name or course_name in topic_clean:
-            return row
-
-    return None
 
 def find_course_by_no(course_data, course_no):
     if not course_no:
@@ -167,7 +98,6 @@ def detect_followup_type(message: str) -> str:
 
     return "expand"
 
-
 def map_followup_answer_type(followup_type: str) -> str:
     mapping = {
         "summary": "summary_given",
@@ -214,32 +144,6 @@ def load_allowed_course_context(course_use):
     return course_data, course_name_context
 
 
-def build_discovery_message_with_course_context(user_message: str, requirements, missing, course_name_context: str) -> str:
-    return f"""
-ข้อความผู้เรียน:
-{user_message}
-
-Requirement ปัจจุบัน:
-{json.dumps(requirements or {}, ensure_ascii=False)}
-
-Requirement ที่ยังขาด:
-{json.dumps(missing or [], ensure_ascii=False)}
-
-หลักสูตร/หัวข้อที่ระบบอนุญาตให้ใช้เป็นความรู้:
-{course_name_context or ""}
-
-คำสั่ง:
-- ผู้เรียนยังไม่ได้ระบุ content/topic ที่ชัดเจน หรือยังมี requirement ที่ต้องเก็บเพิ่ม
-- ห้ามตอบว่าระบบไม่มีข้อมูลหลักสูตร ถ้ามีรายชื่อหลักสูตรด้านบน
-- ให้ทักทายหรือรับข้อความของผู้เรียนอย่างเป็นธรรมชาติ
-- บอกแบบสั้น ๆ ว่าคุณช่วยเรื่องอะไรได้บ้างจากรายชื่อหลักสูตรด้านบน โดยยกตัวอย่างไม่เกิน 3-5 รายการ
-- อย่าลิสต์ยาวเกินไป
-- ปิดท้ายด้วยคำถาม 1 คำถาม เพื่อถามว่าอยากเรียนหรือพัฒนาเรื่องไหนเป็นพิเศษ
-- ตอบภาษาไทย สุภาพ กระชับ
-""".strip()
-
-from datetime import datetime
-
 def build_learning_journey_name(requirements: dict, topic: str = "", existing_name: str | None = None) -> str:
     """
     สร้างชื่อ learning journey สำหรับใช้เป็นชื่อ chat history / room
@@ -277,87 +181,11 @@ def build_learning_journey_name(requirements: dict, topic: str = "", existing_na
 
     return "Learning Journey"
 
-def update_learning_feedback_state(state, user_message: str, reply: str, feedback_intent: str):
-    now = datetime.utcnow().isoformat()
-
-    if not getattr(state, "learning_phase", None):
-        state.learning_phase = {}
-
-    learning_phase = state.learning_phase or {}
-
-    feedback_history = learning_phase.get("feedback_history") or []
-
-    feedback_record = {
-        "intent": feedback_intent,
-        "user_message": user_message,
-        "assistant_reply": reply,
-        "created_at": now,
-    }
-
-    if feedback_intent == "report_done":
-        feedback_record["completion_status"] = "done"
-        learning_phase["status"] = "user_reported_done"
-        state.feedback_status = "user_reported_done"
-
-    elif feedback_intent == "report_partial":
-        feedback_record["completion_status"] = "partial"
-        learning_phase["status"] = "user_reported_partial"
-        state.feedback_status = "user_reported_partial"
-
-    elif feedback_intent == "report_not_done":
-        feedback_record["completion_status"] = "not_done"
-        learning_phase["status"] = "user_not_started"
-        state.feedback_status = "user_not_started"
-
-    elif feedback_intent == "blocked":
-        feedback_record["completion_status"] = "blocked"
-        learning_phase["status"] = "user_blocked"
-        state.feedback_status = "user_blocked"
-
-    elif feedback_intent == "review_request":
-        learning_phase["status"] = "review_requested"
-        state.feedback_status = "review_requested"
-
-    else:
-        learning_phase["status"] = "active_learning"
-        state.feedback_status = learning_phase.get("feedback_status") or "not_started"
-
-    feedback_history.append(feedback_record)
-
-    # กัน history ยาวเกินไป
-    learning_phase["feedback_history"] = feedback_history[-20:]
-    learning_phase["last_feedback"] = feedback_record
-    learning_phase["updated_at"] = now
-
-    state.learning_phase = learning_phase
-
-    return state
-
-def build_unrelated_feedback_reply(state) -> str:
-    learning_phase = getattr(state, "learning_phase", {}) or {}
-    requirements = learning_phase.get("requirements") or getattr(state, "requirements", {}) or {}
-
-    topic = learning_phase.get("topic") or getattr(state, "topic", "หัวข้อที่กำลังเรียน")
-    content = requirements.get("content") or topic
-
-    return f"""
-ตอนนี้ห้องนี้อยู่ในโหมด learning feedback เรื่อง “{content}” ครับ
-
-คำถามล่าสุดดูเหมือนยังไม่เกี่ยวกับหัวข้อที่เรากำลังเรียนอยู่โดยตรง ผมจึงยังไม่เปลี่ยนหัวข้อให้อัตโนมัติ เพื่อไม่ให้แผนการเรียนรู้เดิมหลุดบริบทครับ
-
-คุณสามารถคุยต่อในเรื่องนี้ได้ เช่น:
-- ขอให้ผมอธิบายเพิ่ม
-- ขอตัวอย่างการนำไปใช้
-- เล่าว่าคุณได้ลองทำแล้วหรือยัง
-- บอกจุดที่ติดปัญหา
-
-ถ้าต้องการเริ่มเรื่องใหม่ ให้พิมพ์ว่า “เริ่มหัวข้อใหม่” ได้ครับ
-""".strip()
-
 
 
 async def process_chat_aicustom_stream(req, state):
     
+    # ถ้าไม่มี state ส่งมาจะสร้าง state ใหม่
     if state is None:
         state = ChatState_aicustom()
     
@@ -366,18 +194,17 @@ async def process_chat_aicustom_stream(req, state):
     "topic": getattr(state, "topic", None),
     "has_rag": bool(getattr(state, "matched_rag_results", None)),
     "has_learning_phase": bool(getattr(state, "learning_phase", None)),
-}, flush=True)
+    }, flush=True)
 
+    # แกะข้อมูลจาก req 
     user_message = (req.user_message or "").strip()
-
     state.web_no = int(req.web_no) if req.web_no not in [None, ""] else None
     state.member_no = int(req.member_no) if req.member_no not in [None, ""] else None
-
     if req.course_use:
         state.course_use = [int(x) for x in req.course_use if str(x).strip()]
 
+    # เช็คว่ามี course_use ไหม
     course_use = state.course_use or []
-
     if not course_use:
         reply = "ขออภัยครับ ยังไม่พบรายการหลักสูตรที่อนุญาตให้ใช้งาน"
         yield {"type": "chunk", "text": reply}
@@ -391,29 +218,24 @@ async def process_chat_aicustom_stream(req, state):
             "active_video": None,
         }
         return
-
+    
     # =========================
     # 0) โหลดรายชื่อ course ที่อนุญาตจาก course_no
     #    ใช้เป็น context ตอนผู้เรียนยังไม่ได้บอก content/topic
     #    ไม่ใช่การค้น RAG และไม่ควรใช้แทน RAG เมื่อต้องตอบเนื้อหาเชิงลึก
     # =========================
     course_data, course_name_context = load_allowed_course_context(course_use)
-    # state.allowed_course_data = course_data
-    # state.allowed_course_name_context = course_name_context
 
     # =========================
     # 1) เก็บ conversation history
     # =========================
     if not hasattr(state, "conversation_history") or state.conversation_history is None:
         state.conversation_history = []
-
     state.last_user_message = user_message
-
     state.conversation_history.append({
         "role": "user",
         "content": user_message
     })
-
     if len(state.conversation_history) > 10:
         state.conversation_history = state.conversation_history[-10:]
 
@@ -422,163 +244,12 @@ async def process_chat_aicustom_stream(req, state):
     # หลังจากเก็บข้อมูลครบและแนะนำสิ่งที่ต้องทำไปแล้ว
     # =========================
     if state.mode in ["learning", "feedback"]:
-        print(f"mode : {state.mode}", flush=True)
-
-        intent_result = await detect_feedback_intent_ai(user_message, state)
-        feedback_intent = intent_result.get("intent", "general_feedback")
-
-        print("[LEARNING/FEEDBACK INTENT]", intent_result, flush=True)
-
-        # -------------------------
-        # 1) ผู้ใช้ขอเริ่มหัวข้อใหม่
-        # -------------------------
-        if feedback_intent == "restart_learning":
-            print(f"mode : {state.mode} | new topic", flush=True)
-
-            state.mode = "discovery"
-            state.intent = "unknown"
-            state.topic = "unknown"
-            state.active_course_no = None
-
-            state.last_intent = "restart_learning"
-            state.last_answer_type = "restart_learning"
-
-            state.requirements = {}
-            state.missing_requirements = []
-            state.requirement_ready = False
-
-            state.search_query = None
-            state.matched_rag_results = []
-
-            state.learning_phase = {}
-            state.feedback_status = None
-
-            reply = "ได้ครับ เรามาเริ่มหัวข้อใหม่กัน คุณอยากเรียนหรือพัฒนาเรื่องอะไรเป็นพิเศษครับ?"
-
-            state.last_answer = reply
-
-            state.conversation_history.append({
-                "role": "assistant",
-                "content": reply
-            })
-
-            if len(state.conversation_history) > 10:
-                state.conversation_history = state.conversation_history[-10:]
-
-            yield {"type": "chunk", "text": reply}
-            yield {
-                "type": "done",
-                "reply": reply,
-                "state": state,
-                "source": "ai_custom_learning_feedback",
-                "status": "collecting_requirement",
-                "reason": "restart_learning_requested",
-                "active_video": None,
-                "intent_result": intent_result,
-            }
-            return
-
-        # -------------------------
-        # 2) คำถามไม่เกี่ยวกับ learning phase เดิม
-        # -------------------------
-        if feedback_intent == "unrelated":
-            print(f"mode : {state.mode} | out of topic", flush=True)
-
-            reply = build_unrelated_feedback_reply(state)
-
-            state.last_answer = reply
-            state.last_intent = "learning_unrelated"
-            state.last_answer_type = "learning_unrelated_redirect"
-
-            state.conversation_history.append({
-                "role": "assistant",
-                "content": reply
-            })
-
-            if len(state.conversation_history) > 10:
-                state.conversation_history = state.conversation_history[-10:]
-
-            yield {"type": "chunk", "text": reply}
-            yield {
-                "type": "done",
-                "reply": reply,
-                "state": state,
-                "source": "ai_custom_learning_feedback",
-                "status": state.mode,
-                "reason": "unrelated_to_learning_phase",
-                "active_video": None,
-                "intent_result": intent_result,
-            }
-            return
-
-        # -------------------------
-        # 3) learning / feedback ต่อใน journey เดิม
-        # -------------------------
-        if feedback_intent in FEEDBACK_INTENTS:
-            next_mode = "feedback"
-            print(f"mode : {state.mode} | feedback flow | intent={feedback_intent}", flush=True)
-        else:
-            next_mode = "learning"
-            print(f"mode : {state.mode} | learning flow | intent={feedback_intent}", flush=True)
-
-        rag_results = getattr(state, "matched_rag_results", []) or []
-        rag_context = build_rag_context(rag_results) if rag_results else ""
-
-        final_reply = ""
-
-        async for item in reply_learning_feedback_stream(
-            user_message=user_message,
-            state=state,
-            feedback_intent=feedback_intent,
-            rag_context=rag_context,
-        ):
-            if item.get("type") == "chunk":
-                text = item.get("text", "")
-                final_reply += text
-                yield {"type": "chunk", "text": text}
-
-            elif item.get("type") == "done":
-                final_reply = item.get("content") or final_reply
-
-        state = update_learning_feedback_state(
-            state=state,
-            user_message=user_message,
-            reply=final_reply,
-            feedback_intent=feedback_intent,
-        )
-
-        state.mode = next_mode
-        state.last_answer = final_reply
-        state.last_intent = feedback_intent
-        state.last_answer_type = f"{next_mode}_{feedback_intent}"
-
-        state.conversation_history.append({
-            "role": "assistant",
-            "content": final_reply
-        })
-
-        if len(state.conversation_history) > 10:
-            state.conversation_history = state.conversation_history[-10:]
-
-        yield {
-            "type": "done",
-            "reply": final_reply,
-            "state": state,
-            "source": f"ai_custom_{next_mode}",
-            "status": next_mode,
-            "reason": feedback_intent,
-            # "active_video": (
-            #     (getattr(state, "learning_phase", {}) or {}).get("active_video")
-            #     if getattr(state, "learning_phase", None)
-            #     else None
-            # ),
-            "active_video": None,
-            "intent_result": intent_result,
-        }
-
+        async for item in handle_learning_feedback_flow(user_message, state):
+            yield item
         return
 
     # =========================
+    # mode Discovery เก็บ requirements ตามที่ตั้งค่าใว้ จัดการเรื่อง new old requirements เพื่อจัดการ state
     # 2) Extract requirement ก่อน
     # =========================
     old_requirements = dict(getattr(state, "requirements", {}) or {})
@@ -586,13 +257,16 @@ async def process_chat_aicustom_stream(req, state):
     new_requirements = await extract_requirements(
         user_message=user_message,
         current_requirements=old_requirements,
-        conversation_history=state.conversation_history
+        conversation_history=state.conversation_history,
     )
 
+    old_content = str(old_requirements.get("content") or "").strip()
+    new_content = str((new_requirements or {}).get("content") or "").strip()
+
     old_req = " ".join(
-    str(v).strip()
-    for k, v in sorted((old_requirements or {}).items())
-    if k not in ["matched_course"] and v
+        str(v).strip()
+        for k, v in sorted((old_requirements or {}).items())
+        if k not in ["matched_course"] and v
     ).strip()
 
     new_req = " ".join(
@@ -601,83 +275,51 @@ async def process_chat_aicustom_stream(req, state):
         if k not in ["matched_course"] and v
     ).strip()
 
-    old_content = str(old_requirements.get("content") or "").strip()
-    new_content = str((new_requirements or {}).get("content") or "").strip()
-    print(f"req : {new_requirements}", flush=True)
-
-    print(
-        f"REQ CHECK | old_req={old_req} | new_req={new_req}",
-        flush=True
-    )
-
-    req_changed = (
+    req_changed = bool(
         old_req
         and new_req
         and old_req.lower() != new_req.lower()
     )
 
-    req_same = (
+    req_same = bool(
         old_req
         and new_req
         and old_req.lower() == new_req.lower()
     )
 
-    has_cached_rag = bool(getattr(state, "matched_rag_results", None))
-
-    if req_changed:
-        print(f"[AI_CUSTOM] REQUIREMENT CHANGED: {old_req} -> {new_req}", flush=True)
-
-        state.requirements = new_requirements or {}
-        state.matched_rag_results = []
-        state.active_course_no = None
-        state.topic = new_content or getattr(state, "topic", "unknown")
-        has_cached_rag = False
-    else:
-        state.requirements = new_requirements or {}
-
-    print(
-            f"REQ CHECK | old_content={old_content} | new_content={new_content}",
-            flush=True
-        )
-
-    topic_changed = (
+    content_changed = bool(
         old_content
         and new_content
         and old_content.lower() != new_content.lower()
     )
 
-    topic_same = (
-        old_content
-        and new_content
-        and old_content.lower() == new_content.lower()
+    print(f"req : {new_requirements}", flush=True)
+    print(
+        f"REQ CHECK | old_req={old_req} | new_req={new_req} | "
+        f"content_changed={content_changed}",
+        flush=True,
     )
+
+    # update requirements ครั้งเดียวพอ
+    state.requirements = new_requirements or {}
+
+    # sync topic ให้เท่ากับ content เพราะคุณใช้เป็นตัวเดียวกัน
+    if new_content:
+        state.topic = new_content
+
+    # ล้าง RAG cache เฉพาะตอน content/topic หลักเปลี่ยน
+    if content_changed:
+        print(f"[AI_CUSTOM] CONTENT CHANGED: {old_content} -> {new_content}", flush=True)
+
+        state.matched_rag_results = []
+        state.active_course_no = None
 
     has_cached_rag = bool(getattr(state, "matched_rag_results", None))
 
-    if topic_changed:
-        print(f"[AI_CUSTOM] TOPIC CHANGED: {old_content} -> {new_content}", flush=True)
-
-        state.requirements = {
-            "content": new_content,
-            "goal": "",
-            "event": "",
-        }
-        state.matched_rag_results = []
-        state.active_course_no = None
-        state.topic = new_content
-        has_cached_rag = False
-    else:
-        state.requirements = new_requirements or {}
-
+    # หาว่า requirements ขาดอะไรบ้าง
     missing = calc_missing_requirements(state.requirements)
     state.missing_requirements = missing
     state.requirement_ready = len(missing) == 0
-
-    req_text = " ".join(
-        str(v).strip()
-        for v in (state.requirements or {}).values()
-        if v
-    ).strip()
 
     # =========================
     # 3) ตัดสินใจก่อนว่าจะ search RAG ไหม
@@ -704,16 +346,137 @@ async def process_chat_aicustom_stream(req, state):
 
     rag_results = list(getattr(state, "matched_rag_results", []) or [])
 
+    # search จาก rag
     if should_search_rag:
-        search_text = req_text
+        search_text = await build_rag_query_with_llm(
+            requirements=state.requirements or {},
+            user_message=user_message,
+            conversation_history=getattr(state, "conversation_history", None),
+        )
+
+        print(f"RAG SEARCH QUERY | {search_text}", flush=True)
 
         try:
             rag_results = search_rag(
                 user_message=search_text,
                 course_nos=course_use,
-                limit=5,
-                score_threshold=0.20,
+                limit=8,
+                score_threshold=0.15,
             )
+
+            rag_results = await filter_rag_results_by_relevance(
+                user_message=user_message,
+                requirements=state.requirements,
+                rag_results=rag_results,
+                limit=5,
+            )
+
+            print(
+                f"RAG RELEVANCE FILTER | kept={len(rag_results or [])}",
+                flush=True
+            )
+
+            # ไม่มีหลักสูตรที่เกี่ยวข้อง
+            if not rag_results:
+                # กรณี requirement ยังไม่ครบ แต่ user พูดเรื่อง learning ถูกทาง
+                # ไม่ต้อง reject ให้ถาม requirement ถัดไปแทน
+                if missing:
+                    reply = ""
+
+                    async for item in build_next_question_after_no_rag(
+                        requirements=state.requirements,
+                        missing=missing,
+                        conversation_history=state.conversation_history,
+                    ):
+                        if isinstance(item, dict):
+                            if item.get("type") == "chunk":
+                                text = item.get("text", "")
+                                reply += text
+                                yield {"type": "chunk", "text": text}
+                            elif item.get("type") == "done":
+                                reply = item.get("content") or reply
+                        else:
+                            text = str(item)
+                            reply += text
+                            yield {"type": "chunk", "text": text}
+
+                    state.mode = "discovery"
+                    state.last_answer = reply
+                    state.last_intent = "collect_requirement"
+                    state.last_answer_type = "ask_requirement_after_no_rag"
+
+                    state.conversation_history.append({
+                        "role": "assistant",
+                        "content": reply
+                    })
+
+                    if len(state.conversation_history) > 10:
+                        state.conversation_history = state.conversation_history[-10:]
+
+                    yield {
+                        "type": "done",
+                        "reply": reply,
+                        "status": "collecting_requirement",
+                        "reason": "rag_empty_but_requirement_missing",
+                        "state": state,
+                        "source": "ai_custom_discovery",
+                        "active_video": None,
+                    }
+                    return
+
+                # กรณี requirement ครบแล้ว แต่ RAG ไม่เจอจริง ๆ
+                # แปลว่า requirement ชุดนี้ไม่ตรงกับหลักสูตรที่เปิดให้ใช้
+                # ต้อง reset requirement เพื่อไม่ให้วน search ด้วย req เดิมซ้ำ
+
+                state.mode = "discovery"
+                state.intent = "unknown"
+                state.topic = "unknown"
+                state.active_course_no = None
+
+                state.requirements = {}
+                state.missing_requirements = calc_missing_requirements({})
+                state.requirement_ready = False
+
+                state.search_query = None
+                state.matched_rag_results = []
+
+                reply = (
+                    "ขออภัยครับ ตอนนี้ยังไม่พบเนื้อหาในระบบ Self-Learning "
+                    "ที่ตรงกับความต้องการนี้ในหลักสูตรที่เปิดให้ใช้งานครับ "
+                )
+
+                if course_name_context:
+                    reply += (
+                        f"หัวข้อที่ระบบมีตอนนี้ เช่น {course_name_context} "
+                        "คุณอยากเรียนหรือพัฒนาเรื่องไหนจากหัวข้อเหล่านี้ครับ?"
+                    )
+                else:
+                    reply += "คุณอยากลองบอกหัวข้อใหม่ที่ต้องการเรียนหรือพัฒนาไหมครับ?"
+
+                state.last_answer = reply
+                state.last_intent = "course_not_matched"
+                state.last_answer_type = "reset_requirement_after_relevance_empty"
+
+                state.conversation_history.append({
+                    "role": "assistant",
+                    "content": reply
+                })
+
+                if len(state.conversation_history) > 10:
+                    state.conversation_history = state.conversation_history[-10:]
+
+                yield {"type": "chunk", "text": reply}
+                yield {
+                    "type": "done",
+                    "reply": reply,
+                    "status": "collecting_requirement",
+                    "reason": "rag_relevance_filter_empty_requirement_reset",
+                    "state": state,
+                    "source": "ai_custom_rag_relevance_filter",
+                    "active_video": None,
+                }
+                return
+            
         except Exception as e:
             print("[STREAM RAG ERROR TYPE]", type(e), flush=True)
             print("[STREAM RAG ERROR REPR]", repr(e), flush=True)
@@ -741,21 +504,15 @@ async def process_chat_aicustom_stream(req, state):
 
     if missing and not best:
         reply = ""
-
         # ถ้ามีรายชื่อ course ที่อนุญาต ให้ใช้เป็น hint ตอนถามหา content
         # เช่น user พิมพ์ "สวัสดี" แล้ว AI ควรบอกได้เล็กน้อยว่ามีความรู้เรื่องอะไรบ้าง
         if course_name_context:
-            discovery_message = build_discovery_message_with_course_context(
+
+            async for item in reply_discovery_with_course_context_stream(
                 user_message=user_message,
                 requirements=state.requirements,
                 missing=missing,
                 course_name_context=course_name_context,
-            )
-
-            async for item in reply_ask_concept_with_topic_stream(
-                discovery_message,
-                "หัวข้อที่เปิดให้เรียน",
-                course_name_context,
             ):
                 if item.get("type") == "chunk":
                     text = item.get("text", "")
@@ -873,36 +630,40 @@ async def process_chat_aicustom_stream(req, state):
             or "เนื้อหาที่เกี่ยวข้อง"
         )
 
-        rag_context = build_rag_context(rag_results)
+        # rag_context = build_rag_context(rag_results)
+        rag_context = build_rag_context((rag_results or [])[:2])
 
         reply = ""
 
         brief_message = f"""
-ข้อความผู้เรียน:
-{user_message}
+        ข้อความผู้เรียน:
+        {user_message}
 
-Requirement ปัจจุบัน:
-{json.dumps(state.requirements, ensure_ascii=False)}
+        Requirement ปัจจุบัน:
+        {json.dumps(state.requirements, ensure_ascii=False)}
 
-Requirement ที่ยังขาด:
-{json.dumps(missing, ensure_ascii=False)}
+        Requirement ที่ยังขาด:
+        {json.dumps(missing, ensure_ascii=False)}
 
-RAG_CONTEXT:
-{rag_context}
+        RAG_CONTEXT:
+        {rag_context}
 
-คำสั่ง:
-- ตอบจาก RAG_CONTEXT เท่านั้น
-- ถ้าเนื้อหาใน RAG_CONTEXT ตรงกับสิ่งที่ผู้เรียนถาม ให้สรุปคร่าว ๆ 2-4 ประโยค
-- อย่าตอบจัดเต็ม
-- ไม่ต้องบอกว่าตอบจากเนื้อหาอะไร
-- ห้ามดึง topic เก่าที่ไม่เกี่ยวข้องมาตอบ
-- หลังจากสรุปคร่าว ๆ แล้ว ให้ถามต่อ 1 คำถามเท่านั้น เพื่อเก็บ requirement ที่ยังขาด
-""".strip()
+        คำสั่ง:
+        - ตอบจาก RAG_CONTEXT เท่านั้น
+        - ถ้าเนื้อหาใน RAG_CONTEXT ตรงกับสิ่งที่ผู้เรียนถาม ให้สรุปคร่าว ๆ 2-4 ประโยค
+        - อย่าตอบจัดเต็ม
+        - ไม่ต้องบอกว่าตอบจากเนื้อหาอะไร
+        - ห้ามดึง topic เก่าที่ไม่เกี่ยวข้องมาตอบ
+        - หลังจากสรุปคร่าว ๆ แล้ว ให้ถามต่อ 1 คำถามเท่านั้น เพื่อเก็บ requirement ที่ยังขาด คือ {json.dumps(missing, ensure_ascii=False)}
+        """.strip()
 
-        async for item in reply_ask_concept_with_topic_stream(
-            brief_message,
-            matched_topic,
-            rag_context,
+        async for item in reply_ask_concept_with_topic_stream_new(
+            user_message=user_message,
+            topic=matched_topic,
+            rag_context=rag_context,
+            requirements=state.requirements,
+            missing=missing,
+            mode="brief_then_ask_requirement",
         ):
             if item.get("type") == "chunk":
                 text = item.get("text", "")
@@ -949,7 +710,12 @@ RAG_CONTEXT:
         state.search_query = getattr(state, "search_query", None)
         print("[AI_CUSTOM] USE CACHED RAG FOR COMPLETE REQUIREMENT", flush=True)
     else:
-        search_query = await build_search_query(state.requirements)
+        search_query = await build_rag_query_with_llm(
+            requirements=state.requirements or {},
+            user_message=user_message,
+            conversation_history=getattr(state, "conversation_history", None),
+        )
+
         state.search_query = search_query
 
         try:

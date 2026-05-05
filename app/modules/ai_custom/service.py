@@ -46,6 +46,74 @@ def clean_json(text: str) -> str:
 
 import json
 
+def get_last_assistant_message(conversation_history: list | None) -> str:
+    for item in reversed(conversation_history or []):
+        if item.get("role") == "assistant":
+            content = str(item.get("content") or "").strip()
+            if content:
+                return content
+    return ""
+
+def should_update_requirement(old_value: str, new_value: str) -> bool:
+    old_value = str(old_value or "").strip()
+    new_value = str(new_value or "").strip()
+
+    if not new_value or new_value == "unknown":
+        return False
+
+    if not old_value or old_value == "unknown":
+        return True
+
+    if new_value == old_value:
+        return False
+
+    # ถ้าค่าใหม่ต่อยอดจากค่าเดิม ให้ update
+    if old_value in new_value:
+        return True
+
+    # ถ้าค่าใหม่ยาวกว่า มักเฉพาะเจาะจงกว่า
+    if len(new_value) >= len(old_value):
+        return True
+
+    # กันค่าใหม่สั้น/กว้างกว่า มาทับค่าที่ละเอียดกว่า
+    if len(new_value) < len(old_value) * 0.7:
+        return False
+
+    return True
+
+def extract_event_phrase_from_message(user_message: str) -> str:
+    """
+    ดึง event จาก pattern ภาษาไทยทั่วไป เช่น
+    - เมื่อ...
+    - เวลาที่...
+    - ตอนที่...
+    - กรณีที่...
+    - เหตุการณ์ที่...
+    - สถานการณ์ที่...
+    """
+    text = str(user_message or "").strip()
+
+    patterns = [
+        r"เมื่อเกิดเหตุการณ์ที่(.+)",
+        r"เมื่อเกิดสถานการณ์ที่(.+)",
+        r"เหตุการณ์ที่(.+)",
+        r"สถานการณ์ที่(.+)",
+        r"กรณีที่(.+)",
+        r"เวลาที่(.+)",
+        r"ตอนที่(.+)",
+        r"เมื่อ(.+)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            event = match.group(1).strip()
+            event = re.sub(r"[?.!。！？]+$", "", event).strip()
+            return event
+
+    return ""
+
+
 def build_user_only_conversation_context(conversation_history):
     lines = []
 
@@ -132,13 +200,13 @@ async def build_search_query(requirements: dict) -> str:
     parts = [content, goal, event]
     return " ".join([p for p in parts if p]).strip()
 
-
 async def extract_requirements(
     user_message: str,
-    current_requirements: dict, 
+    current_requirements: dict,
     conversation_history: list | None = None
 ) -> dict:
-    conversation_context = build_user_only_conversation_context(conversation_history)
+    conversation_context = build_conversation_context(conversation_history, limit=8)
+    last_assistant_message = get_last_assistant_message(conversation_history)
 
     system_prompt = f"""
 คุณคือ AI Learning Consultant สำหรับระบบ Self-Learning ของสถาบัน
@@ -148,32 +216,65 @@ async def extract_requirements(
 - รวมข้อมูลใหม่กับ Requirement เดิม
 - เก็บข้อมูลให้เป็นธรรมชาติ ไม่ใช่แบบฟอร์ม
 - ห้ามเดา ถ้าไม่ชัดให้เว้นว่าง
+- ข้อความล่าสุดของผู้ใช้มักเป็นคำตอบของคำถามล่าสุดจาก AI ให้ตีความตามบริบทนั้นก่อน
 
 Requirement ที่ต้องเก็บ:
-- content = เนื้อหา/หัวข้อ/ทักษะที่ผู้เรียนสนใจ เช่น ภาวะผู้นำ, การขาย, การสื่อสาร, การบริการ, การบริหารทีม, การคิดเชิงกลยุทธ์
-- goal = สิ่งที่ผู้เรียนตั้งใจจะเปลี่ยนหรือลงมือทำ (เน้นการปฏิบัติใหม่).
-- event = สถานการณ์หรือบริบทที่ทำให้ต้องเรียน เช่น กำลังจะเลื่อนตำแหน่ง, ต้องดูแลทีมใหม่, ยอดขายตก, ลูกค้าร้องเรียน, ต้องเตรียมอบรมพนักงาน
+- content = หัวข้อ/ทักษะหลักที่ผู้เรียนสนใจ เช่น ภาวะผู้นำ, การขาย, การสื่อสาร, การบริการ, การบริหารทีม, การคิดเชิงกลยุทธ์
+- goal = สิ่งที่ผู้เรียนอยากทำให้ดีขึ้นหรืออยากเปลี่ยนเป็นพฤติกรรมใหม่ เช่น ปิดการขายได้ดีขึ้น, โน้มน้าวใจลูกค้าได้ดีขึ้น, สื่อสารกับทีมได้ดีขึ้น, สั่งงานได้ชัดเจนขึ้น
+- event = สถานการณ์จริง เหตุการณ์ เงื่อนไข บทบาท หรือบริบทที่ผู้เรียนต้องการนำทักษะไปใช้ เช่น ราคาสินค้าสูงกว่าที่ลูกค้าต้องการ, ลูกค้าต่อราคา, กำลังจะเป็นหัวหน้างาน, ต้องดูแลทีมใหม่, ลูกค้าร้องเรียน
 
 Requirement เดิม:
-{json.dumps(current_requirements or {}, ensure_ascii=False)}
+{json.dumps(current_requirements or {}, ensure_ascii=False, indent=2)}
+
+คำถามล่าสุดจาก AI:
+{last_assistant_message}
 
 บทสนทนาก่อนหน้า:
 {conversation_context}
 
 กฎสำคัญ:
-- ถ้าข้อมูลเดิมมีอยู่แล้ว และข้อความใหม่ไม่ได้แก้ไข ให้คงค่าเดิม
+- ถ้าข้อมูลเดิมมีอยู่แล้ว และข้อความใหม่ไม่ได้แก้ไข field นั้น ให้คงค่าเดิม
 - ถ้าข้อความใหม่ให้ข้อมูลชัดกว่าเดิม ให้ปรับให้ดีขึ้น
-- ถ้าผู้ใช้ตอบสั้น ๆ เช่น "หัวหน้างาน", "การขาย", "บริการลูกค้า" ให้ตีความจากคำถามล่าสุดในบทสนทนา
+- ถ้าผู้ใช้ตอบสั้น ๆ ให้ตีความจากคำถามล่าสุดจาก AI
 - ห้ามสร้างข้อมูลเอง
-- ถ้าไม่พบข้อมูล ให้ใช้ ""
+- ถ้าไม่พบข้อมูลใหม่ของ field ใด ให้ใช้ "" สำหรับ field นั้น ไม่ต้องคัดลอกข้อมูลเดิมมา
 - ตอบ JSON เท่านั้น
 - content ต้องเป็นหัวข้อหรือทักษะที่เกี่ยวกับการเรียน Self-Learning
-- event ต้องเป็นบริบท/เหตุการณ์/สถานการณ์ ไม่ใช่หัวข้อเรียน
-- ถ้าผู้ใช้พูดแค่ "อยากเรียน" แต่ไม่บอกเรื่องอะไร ให้ content เป็น ""
-- ถ้าผู้ใช้พูดแค่ "มีปัญหา" แต่ไม่บอกปัญหาอะไร ให้ event เป็น ""
-- ถ้าผู้ใช้บอกปัญหาชัด เช่น "ปิดการขายไม่ได้" ให้ content เป็น "การขาย" และ goal เป็น "ปิดการขายได้ดีขึ้น"
-- ถ้าผู้ใช้บอกว่า "กำลังจะเป็นหัวหน้างาน" ให้ event เป็น "กำลังจะเป็นหัวหน้างาน" และ content อาจเป็น "ภาวะผู้นำ" ได้เฉพาะเมื่อบริบทชัดเจน
-- อย่าใส่ข้อมูลซ้ำกันทุก field ถ้าข้อมูลเดียวกันเหมาะกับ field เดียวมากกว่า
+- goal ต้องเป็นสิ่งที่อยากทำให้ดีขึ้นเชิงปฏิบัติ
+- event ต้องเป็นบริบท/เหตุการณ์/สถานการณ์/เงื่อนไขที่ต้องใช้ทักษะนั้น ไม่ใช่หัวข้อเรียน
+- อย่าใส่ข้อมูลเดียวกันซ้ำกันทุก field ถ้าข้อมูลนั้นเหมาะกับ field เดียวมากกว่า
+- ห้ามแทนที่ goal ด้วย event
+- ห้ามแทนที่ event ด้วย goal
+
+กฎสำหรับ event:
+- ถ้า AI ถามว่า "มีเหตุการณ์ใดบ้าง", "สถานการณ์ไหน", "บริบทไหน", "อยากนำไปใช้ในสถานการณ์ใด" ให้ข้อความล่าสุดของผู้ใช้เป็น event เป็นหลัก
+- ถ้าผู้ใช้ใช้คำว่า "เมื่อ", "เวลาที่", "ตอนที่", "กรณีที่", "สถานการณ์ที่", "เหตุการณ์ที่" ให้พิจารณาข้อความหลังคำนั้นเป็น event
+- ถ้าผู้ใช้บอกว่า "เมื่อเกิดเหตุการณ์ที่ราคาสินค้าสูงกว่าที่ลูกค้าต้องการ" ให้ใส่ event = "ราคาสินค้าสูงกว่าที่ลูกค้าต้องการ"
+- ถ้าผู้ใช้บอกว่า "ลูกค้าต่อราคา", "ลูกค้าคิดว่าสินค้าแพง", "ลูกค้าไม่เห็นคุณค่า", "ลูกค้าลังเล" ให้เก็บเป็น event หรือบริบทของการนำทักษะไปใช้
+
+กฎสำหรับ goal:
+- ถ้าผู้ใช้บอกว่า "ยังสื่อสารเพื่อโน้มน้าวใจลูกค้าได้ไม่ดีพอ" ให้ใส่ goal = "สื่อสารเพื่อโน้มน้าวใจลูกค้าได้ดีขึ้น"
+- ถ้าผู้ใช้บอกว่า "ปิดการขายไม่ได้" ให้ content = "การขาย" และ goal = "ปิดการขายได้ดีขึ้น"
+- ถ้าผู้ใช้บอกว่า "อยากสั่งงานให้มีประสิทธิภาพ" ให้ goal = "สั่งงานและมอบหมายงานได้อย่างมีประสิทธิภาพ"
+
+ตัวอย่าง:
+ผู้ใช้: ตอนนี้เหมือนยังสื่อสารเพื่อโน้มน้าวใจลูกค้าได้ไม่ดีพอเมื่อเกิดเหตุการณ์ที่ราคาสินค้าสูงกว่าที่ลูกค้าต้องการ
+JSON:
+{{
+  "content": "การสื่อสารเพื่อโน้มน้าวใจลูกค้า",
+  "goal": "สื่อสารเพื่อโน้มน้าวใจลูกค้าได้ดีขึ้น",
+  "event": "ราคาสินค้าสูงกว่าที่ลูกค้าต้องการ"
+}}
+
+ตัวอย่าง:
+AI ถาม: ท่านคิดว่ามีเหตุการณ์ใดบ้างที่ท่านอยากนำทักษะนี้ไปใช้ในงานขายของท่าน?
+ผู้ใช้: ตอนนี้เหมือนยังสื่อสารเพื่อโน้มน้าวใจลูกค้าได้ไม่ดีพอเมื่อเกิดเหตุการณ์ที่ราคาสินค้าสูงกว่าที่ลูกค้าต้องการ
+JSON:
+{{
+  "content": "การสื่อสารเพื่อโน้มน้าวใจลูกค้า",
+  "goal": "สื่อสารเพื่อโน้มน้าวใจลูกค้าได้ดีขึ้น",
+  "event": "ราคาสินค้าสูงกว่าที่ลูกค้าต้องการ"
+}}
 
 รูปแบบ JSON:
 {{
@@ -191,7 +292,7 @@ Requirement เดิม:
     )
 
     text = (result.get("content") or "").strip()
-    text = text.replace("```json", "").replace("```", "").strip()
+    text = clean_json(text)
 
     try:
         data = json.loads(text)
@@ -205,15 +306,25 @@ Requirement เดิม:
         merged = dict(current_requirements or {})
 
         for key in allowed_keys:
-            value = data.get(key, "")
-            if value not in [None, "", "unknown"]:
-                merged[key] = value
+            old_value = str(merged.get(key) or "").strip()
+            new_value = str(data.get(key) or "").strip()
+
+            if should_update_requirement(old_value, new_value):
+                merged[key] = new_value
             elif key not in merged:
                 merged[key] = ""
 
+        # post-process: ถ้าข้อความมี pattern event ชัดเจน ให้เติม event
+        event_from_message = extract_event_phrase_from_message(user_message)
+
+        if event_from_message:
+            merged["event"] = event_from_message
+
         return merged
 
-    except Exception:
+    except Exception as e:
+        print("[EXTRACT REQUIREMENTS ERROR]", repr(e), flush=True)
+        print("[EXTRACT REQUIREMENTS RAW]", text, flush=True)
         return current_requirements or {}
     
 async def build_next_question(
@@ -267,6 +378,76 @@ field ที่ต้องถามตอนนี้:
     ):
         yield item
 
+async def build_next_question_after_no_rag(
+    requirements: dict,
+    missing: list,
+    conversation_history: list | None = None
+):
+    next_field = missing[0] if missing else None
+    label = FIELD_LABELS.get(next_field, next_field or "")
+    conversation_context = build_conversation_context(conversation_history)
+
+    system_prompt = f"""
+คุณคือ AI Learning Consultant สำหรับระบบ Self-Learning
+
+สถานการณ์:
+- ระบบได้ค้นหาเนื้อหาใน RAG แล้ว
+- แต่ยังไม่พบเนื้อหาความรู้ที่ครอบคลุมหรือเกี่ยวข้องเพียงพอกับสิ่งที่ผู้เรียนพูด
+- อย่างไรก็ตาม Requirement ยังไม่ครบ จึงต้องเก็บข้อมูลต่อ
+- ห้ามสรุปบทเรียน ห้ามแนะนำคอร์สเต็ม และห้ามแต่งความรู้เอง
+
+หน้าที่:
+- บอกผู้เรียนอย่างสุภาพว่าเนื้อหาความรู้ของระบบยังไม่ครอบคลุมหัวข้อนี้เพียงพอ
+- จากนั้นขอเก็บข้อมูลเพิ่มเพื่อดูว่าจะเชื่อมกับหัวข้อที่มีในระบบได้หรือไม่
+- ถามต่อเพียง 1 คำถาม เพื่อเก็บ Requirement ที่ยังขาด
+- ห้ามถามหลายข้อพร้อมกัน
+- ไม่ต้องแนะนำคอร์สเต็มจนกว่า Requirement จะครบและเจอข้อมูลที่เกี่ยวข้องในระบบ
+
+Requirement ปัจจุบัน:
+{json.dumps(requirements or {}, ensure_ascii=False)}
+
+Requirement ที่ยังขาด:
+{json.dumps(missing or [], ensure_ascii=False)}
+
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+field ที่ต้องถามตอนนี้:
+{next_field} = {label}
+
+แนวทาง:
+- ถ้าขาด content ให้ถามว่าอยากเรียน/พัฒนาเรื่องอะไร
+- ถ้าขาด goal ให้ถามว่าอยากได้ผลลัพธ์อะไรหลังเรียน
+- ถ้าขาด event ให้ถามว่ามีสถานการณ์หรือเหตุผลอะไรที่ทำให้สนใจเรื่องนี้ตอนนี้
+
+รูปแบบคำตอบ:
+- ประโยคแรก: แจ้งว่าเนื้อหาความรู้ของระบบยังไม่ครอบคลุมหัวข้อนี้เพียงพอ
+- ประโยคถัดไป: ถาม Requirement ที่ยังขาด 1 คำถามเท่านั้น
+
+ตัวอย่าง:
+ถ้าผู้เรียนบอกว่า "ได้รับโจทย์มาให้พัฒนาทักษะการขาย" และขาด goal
+ให้ตอบประมาณ:
+"ตอนนี้เนื้อหาความรู้ของผมยังไม่ครอบคลุมหัวข้อนี้เพียงพอครับ แต่ผมขอเก็บข้อมูลเพิ่มก่อน เพื่อดูว่าจะเชื่อมกับหัวข้อที่มีในระบบได้ไหมครับ อยากได้ผลลัพธ์อะไรหลังจากพัฒนาทักษะการขายครับ?"
+
+ข้อกำหนด:
+- ตอบภาษาไทย
+- สุภาพ กระชับ เป็นธรรมชาติ
+- ถามคำถามเดียวเท่านั้น
+- ห้ามถามหลายคำถามในคำตอบเดียว
+- ห้ามตอบความรู้ทั่วไป
+- ห้ามสรุปหรือแนะนำบทเรียนจากความรู้ภายนอก
+""".strip()
+
+    user_prompt = "ช่วยแจ้งว่าเนื้อหาความรู้ยังไม่ครอบคลุม และถามคำถามถัดไปจากข้อมูลที่มี"
+
+    async for item in _stream_text_response(
+        model="gpt-4.1-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.3,
+    ):
+        yield item
+
 async def reply_ask_concept_with_topic_stream(
     user_message: str,
     topic: str,
@@ -294,6 +475,78 @@ RAG_CONTEXT:
 """.strip()
 
     user_prompt = f"""
+Requirement ผู้เรียน:
+{requirement_text}
+
+คำถามล่าสุด:
+{user_message}
+""".strip()
+
+    async for item in _stream_text_response(
+        model="gpt-4.1-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.3,
+    ):
+        yield item
+
+async def reply_ask_concept_with_topic_stream_new(
+    user_message: str,
+    topic: str,
+    rag_context: str,
+    requirements: dict | None = None,
+    missing: list | None = None,
+    mode: str = "answer",
+):
+    requirements = requirements or {}
+    missing = missing or []
+
+    requirement_text = json.dumps(requirements, ensure_ascii=False, indent=2)
+
+    system_prompt = f"""
+คุณคือ AI Learning Consultant สำหรับระบบ Self-Learning
+
+หน้าที่:
+- ตอบคำถามผู้เรียนจาก RAG_CONTEXT เท่านั้น
+- ห้ามแต่งข้อมูลนอกเหนือจาก RAG_CONTEXT
+- ตอบภาษาไทย สุภาพ เข้าใจง่าย
+- ไม่ต้องบอกว่าตอบจากเนื้อหาอะไร
+- ถ้า RAG_CONTEXT ไม่พอ ให้บอกว่า "เนื้อหาไม่เพียงพอสำหรับตอบคำถามนี้"
+- ไม่ต้องสวัสดี
+- ห้ามดึง topic เก่าที่ไม่เกี่ยวข้องมาตอบ
+
+หัวข้อ:
+{topic}
+
+RAG_CONTEXT:
+{rag_context}
+""".strip()
+
+    if mode == "brief_then_ask_requirement":
+        user_prompt = f"""
+ข้อความผู้เรียน:
+{user_message}
+
+Requirement ปัจจุบัน:
+{json.dumps(requirements, ensure_ascii=False)}
+
+Requirement ที่ยังขาด:
+{json.dumps(missing, ensure_ascii=False)}
+
+RAG_CONTEXT:
+{rag_context}
+
+คำสั่ง:
+- ตอบจาก RAG_CONTEXT เท่านั้น
+- ถ้าเนื้อหาใน RAG_CONTEXT ตรงกับสิ่งที่ผู้เรียนถาม ให้สรุปคร่าว ๆ 2-4 ประโยค
+- อย่าตอบจัดเต็ม
+- ไม่ต้องบอกว่าตอบจากเนื้อหาอะไร
+- ห้ามดึง topic เก่าที่ไม่เกี่ยวข้องมาตอบ
+- หลังจากสรุปคร่าว ๆ แล้ว ให้ถามต่อ 1 คำถามเท่านั้น เพื่อเก็บ requirement ที่ยังขาด คือ {json.dumps(missing, ensure_ascii=False)}
+""".strip()
+
+    else:
+        user_prompt = f"""
 Requirement ผู้เรียน:
 {requirement_text}
 
@@ -762,3 +1015,287 @@ Feedback history ล่าสุด:
             "is_related_to_learning_phase": fallback_intent != "unrelated",
             "reason": "fallback_to_rule_based",
         }
+    
+async def build_rag_query_with_llm(
+    requirements: dict,
+    user_message: str = "",
+    conversation_history: list | None = None,
+) -> str:
+    """
+    สร้าง search query สำหรับ RAG จาก requirements
+
+    จุดประสงค์:
+    - ไม่เอา content + goal + event มาต่อกันตรง ๆ
+    - ให้ LLM เลือกเฉพาะคำที่เหมาะกับการค้นหาบทเรียน/วิดีโอ
+    - ตัดคำที่ไม่ช่วยค้น เช่น รูปแบบคำตอบ ความยาว โทนภาษา ฯลฯ
+    - คืนค่าเป็นข้อความ query สั้น ๆ สำหรับส่งเข้า search_rag()
+    """
+
+    conversation_context = build_user_only_conversation_context(conversation_history)
+
+    fallback_parts = [
+        str(requirements.get("content") or "").strip(),
+        str(requirements.get("goal") or "").strip(),
+        str(requirements.get("event") or "").strip(),
+        str(user_message or "").strip(),
+    ]
+
+    fallback_query = " ".join([p for p in fallback_parts if p]).strip()
+
+    if not fallback_query:
+        return ""
+
+    system_prompt = """
+คุณคือ Query Planner สำหรับระบบ RAG ภาษาไทยของระบบ Self-Learning
+
+หน้าที่:
+- อ่าน Requirement ของผู้เรียน แล้วสร้าง search query สำหรับค้นหาความรู้จากคลังวิดีโอ/คอร์ส
+- Query ที่สร้างต้องเหมาะกับ semantic search / vector search
+- ห้ามตอบคำถามผู้เรียน
+- ห้ามแนะนำคอร์ส
+- ห้ามแต่งข้อมูลใหม่ที่ไม่มีใน Requirement
+- ให้คืนเฉพาะ search query เท่านั้น
+
+หลักการสร้าง query:
+- เน้นหัวข้อการเรียนรู้ ทักษะ ปัญหา สถานการณ์ และผลลัพธ์ที่อยากพัฒนา
+- ใช้คำที่น่าจะอยู่ในบทเรียน เช่น ทักษะ, พฤติกรรม, ปัญหา, บริบทการทำงาน
+- ถ้าคำค้นสั้น ให้เพิ่มคำใกล้เคียงที่สมเหตุสมผล
+- ถ้ามีคำอังกฤษที่ใช้ทั่วไปในสายงาน สามารถใส่เพิ่มได้ เช่น leadership, communication, sales
+- อย่าใส่คำที่เป็นรูปแบบ output เช่น สรุป, bullet, 5 ข้อ, ภาษาเข้าใจง่าย, ความยาว, สไตล์การตอบ
+- อย่าใส่ข้อมูลซ้ำหลายรอบ
+- ความยาวเหมาะสม ประมาณ 1-3 บรรทัด
+- ตอบเป็นข้อความธรรมดาเท่านั้น ไม่ต้อง JSON ไม่ต้อง markdown
+""".strip()
+
+    user_prompt = f"""
+Requirement ผู้เรียน:
+{json.dumps(requirements or {}, ensure_ascii=False, indent=2)}
+
+ข้อความล่าสุดจากผู้เรียน:
+{user_message or ""}
+
+บทสนทนาก่อนหน้าเฉพาะฝั่งผู้ใช้:
+{conversation_context}
+
+จงสร้าง RAG search query ที่เหมาะสมที่สุด 1 ชุด
+""".strip()
+
+    try:
+        result = await call_openai_chat_full(
+            model="gpt-4.1-nano",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.2,
+        )
+
+        query = (result.get("content") or "").strip()
+        query = clean_json(query)
+
+        # กันกรณี model เผลอตอบยาว/มี bullet/มี markdown
+        query = re.sub(r"^[\-\*\d\.\)\s]+", "", query).strip()
+        query = re.sub(r"\s+", " ", query).strip()
+
+        if not query:
+            return fallback_query
+
+        # จำกัดความยาวกัน query บวมเกินไป
+        if len(query) > 700:
+            query = query[:700].strip()
+
+        return query
+
+    except Exception as e:
+        print("[BUILD RAG QUERY ERROR]", repr(e), flush=True)
+        return fallback_query
+    
+async def filter_rag_results_by_relevance(
+    user_message: str,
+    requirements: dict,
+    rag_results: list,
+    limit: int = 5,
+) -> list:
+    if not rag_results:
+        return []
+
+    items = []
+
+    for i, item in enumerate((rag_results or [])[:limit]):
+        payload = item.get("payload", {}) if isinstance(item.get("payload"), dict) else {}
+
+        title = (
+            item.get("vdo_name")
+            or item.get("course")
+            or item.get("course_name")
+            or payload.get("vdo_name")
+            or payload.get("course")
+            or payload.get("course_name")
+            or ""
+        )
+
+        text = (
+            item.get("text")
+            or item.get("embedding_text")
+            or payload.get("text")
+            or payload.get("embedding_text")
+            or ""
+        )
+
+        items.append({
+            "index": i,
+            "score": item.get("score"),
+            "title": str(title)[:200],
+            "text": str(text)[:900],
+        })
+
+    system_prompt = """
+คุณคือ RAG Relevance Checker สำหรับระบบ Self-Learning
+
+หน้าที่:
+- ตรวจว่า RAG result แต่ละรายการเกี่ยวข้องกับสิ่งที่ผู้เรียนต้องการจริงหรือไม่
+- ห้ามเชื่อ score จาก vector เพียงอย่างเดียว
+- ให้ดูจาก requirement, ข้อความล่าสุดของผู้เรียน, ชื่อหัวข้อ และเนื้อหา
+- ตอบ JSON เท่านั้น
+""".strip()
+
+    user_prompt = f"""
+ข้อความล่าสุดของผู้เรียน:
+{user_message}
+
+Requirement ปัจจุบัน:
+{json.dumps(requirements or {}, ensure_ascii=False, indent=2)}
+
+RAG results:
+{json.dumps(items, ensure_ascii=False, indent=2)}
+
+ให้ตัดสินว่า result ไหนเกี่ยวข้องจริงกับ requirement ของผู้เรียน
+
+เกณฑ์:
+- relevant = เนื้อหาช่วยตอบหรือช่วยต่อยอดสิ่งที่ผู้เรียนต้องการเรียนจริง
+- irrelevant = เนื้อหามีคำใกล้เคียง แต่คนละเรื่องกับเจตนาหลัก
+- ถ้าผู้เรียนต้องการ "ปิดยอดขาย" แต่ result พูดเรื่อง "การโค้ชทีมงาน" ให้ irrelevant
+- ถ้าผู้เรียนต้องการ "สื่อสารโน้มน้าวลูกค้าเรื่องราคา" และ result พูดถึง "ลูกค้า/การสื่อสาร/การโน้มน้าว/ราคา/การขาย" ให้ relevant
+- ถ้าผู้เรียนต้องการ "ภาวะผู้นำหัวหน้างาน" และ result พูดถึง "หัวหน้างาน/การนำทีม/มอบหมายงาน/บริหารทีม" ให้ relevant
+- ถ้าไม่แน่ใจ ให้ irrelevant ไว้ก่อน
+
+ตอบเป็น JSON array เท่านั้น:
+[
+  {{
+    "index": 0,
+    "is_relevant": true,
+    "confidence": 0.0,
+    "reason": "เหตุผลสั้น ๆ"
+  }}
+]
+""".strip()
+
+    try:
+        result = await call_openai_chat_full(
+            model="gpt-4.1-nano",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0,
+        )
+
+        raw = clean_json(result.get("content") or "[]")
+        data = json.loads(raw)
+
+        relevant_indexes = set()
+
+        for row in data:
+            try:
+                idx = int(row.get("index"))
+                is_relevant = bool(row.get("is_relevant"))
+                confidence = float(row.get("confidence") or 0)
+            except Exception:
+                continue
+
+            if is_relevant and confidence >= 0.55:
+                relevant_indexes.add(idx)
+
+        filtered = [
+            item
+            for i, item in enumerate((rag_results or [])[:limit])
+            if i in relevant_indexes
+        ]
+
+        return filtered
+
+    except Exception as e:
+        print("[RAG RELEVANCE CHECK ERROR]", repr(e), flush=True)
+
+        # fallback: ถ้า relevance checker พัง อย่าให้ระบบล่ม
+        # แต่เพื่อความปลอดภัย ไม่ควรคืนทั้งหมดถ้ากำลังอยู่ในช่วง sensitive/missing
+        return rag_results[:limit]
+
+async def reply_discovery_with_course_context_stream(
+    user_message: str,
+    requirements: dict | None,
+    missing: list | None,
+    course_name_context: str,
+):
+    requirement_text = json.dumps(
+        requirements or {},
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    missing_text = json.dumps(
+        missing or [],
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    system_prompt = """
+คุณคือ AI Learning Consultant เพศชาย สำหรับระบบ Self-Learning / IDP
+
+บุคลิกการตอบ:
+- คุยเหมือนที่ปรึกษาการเรียนรู้ที่เป็นกันเอง สุภาพ อบอุ่น และไม่เป็นทางการเกินไป
+- ใช้คำว่า "ครับ" ได้อย่างเป็นธรรมชาติ แต่ไม่ต้องใส่ทุกประโยค
+- อย่าเปิดคำตอบเหมือนรายงานระบบหรือ catalog หลักสูตร
+- ให้เริ่มจากรับฟัง/ชวนคุยก่อน เช่น ผู้เรียนอยากปรึกษาเรื่องอะไร อยากพัฒนาด้านไหน หรือตอนนี้ติดเรื่องอะไรอยู่
+- ตอบสั้น กระชับ ไม่เกิน 4-6 ประโยค
+
+บริบท:
+- ผู้เรียนยังไม่ได้ระบุความต้องการครบพอที่จะสร้าง learning journey
+- ตอนนี้ระบบมีเพียง "รายชื่อหลักสูตรที่ผู้เรียนมีสิทธิ์เรียน"
+- ยังไม่มี RAG_CONTEXT หรือเนื้อหาบทเรียนแบบละเอียด
+
+หน้าที่:
+- ตอบรับข้อความผู้เรียนอย่างเป็นธรรมชาติ
+- ช่วยผู้เรียนค่อย ๆ เลือกหัวข้อหรือทิศทางการพัฒนา
+- ใช้รายชื่อหลักสูตรที่เปิดให้เรียนเป็น hint เท่านั้น
+- แนะนำตัวไปว่ามีความรู้กว่ากี่หลักสูตร
+- ถ้าเหมาะสม ค่อยบอกสั้น ๆ ว่ามีหัวข้อที่ช่วยได้ เช่น 2-3 ตัวอย่างจากรายชื่อหลักสูตร
+- ถ้าต้องพูดจำนวนหลักสูตร ให้พูดแบบนุ่ม ๆ ไม่ใช่เหมือนรายงาน เช่น "ผมมีหัวข้อให้ช่วยดูอยู่ประมาณ X หลักสูตร"
+- ถามต่อเพียง 1 คำถาม โดยเน้นว่า "อยากปรึกษาเรื่องอะไร" หรือ "ตอนนี้อยากพัฒนาเรื่องไหน"
+
+ข้อห้าม:
+- ห้ามเริ่มด้วยประโยคแนว "ตอนนี้ระบบมีหลักสูตรให้เลือกเรียนทั้งหมด..."
+- ห้ามลิสต์ชื่อหลักสูตรยาวเกิน 3 รายการในคำตอบแรก
+- ห้ามตอบเชิงลึกเหมือนมีเนื้อหาบทเรียนเต็ม
+- ห้ามแต่งชื่อหลักสูตรที่ไม่มีในรายชื่อ
+- ห้ามบอกว่าอ้างอิงจาก RAG หรือเนื้อหาหลักสูตรละเอียด
+- ห้ามถามหลายคำถามในคำตอบเดียว
+""".strip()
+
+    user_prompt = f"""
+ข้อความผู้เรียน:
+{user_message}
+
+Requirement ปัจจุบัน:
+{requirement_text}
+
+Requirement ที่ยังขาด:
+{missing_text}
+
+รายชื่อหลักสูตรที่เปิดให้เรียน:
+{course_name_context or "-"}
+""".strip()
+
+    async for item in _stream_text_response(
+        model="gpt-4.1-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.5,
+    ):
+        yield item

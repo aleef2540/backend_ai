@@ -119,13 +119,13 @@ def search_rag(
 
     course_no_values = normalize_course_nos(course_nos)
 
-    print("\n========== RAG DEBUG START ==========", flush=True)
-    print("[RAG] user_message =", repr(user_message), flush=True)
-    print("[RAG] raw course_nos =", course_nos, flush=True)
-    print("[RAG] normalized course_no_values =", course_no_values, flush=True)
-    print("[RAG] collection =", QDRANT_COLLECTION, flush=True)
-    print("[RAG] limit =", limit, flush=True)
-    print("[RAG] score_threshold =", score_threshold, flush=True)
+    # print("\n========== RAG DEBUG START ==========", flush=True)
+    # print("[RAG] user_message =", repr(user_message), flush=True)
+    # print("[RAG] raw course_nos =", course_nos, flush=True)
+    # print("[RAG] normalized course_no_values =", course_no_values, flush=True)
+    # print("[RAG] collection =", QDRANT_COLLECTION, flush=True)
+    # print("[RAG] limit =", limit, flush=True)
+    # print("[RAG] score_threshold =", score_threshold, flush=True)
 
     if not course_no_values:
         print("[RAG] no course_no_values -> return []", flush=True)
@@ -147,7 +147,7 @@ def search_rag(
         ]
     )
 
-    print("[RAG] filter =", qdrant_filter, flush=True)
+    # print("[RAG] filter =", qdrant_filter, flush=True)
 
     query_result = qdrant.query_points(
         collection_name=QDRANT_COLLECTION,
@@ -159,7 +159,7 @@ def search_rag(
 
     raw_points = extract_points(query_result)
 
-    print("[RAG] raw_points count =", len(raw_points), flush=True)
+    # print("[RAG] raw_points count =", len(raw_points), flush=True)
 
     results = []
 
@@ -174,14 +174,14 @@ def search_rag(
         payload = normalized["payload"] or {}
 
         # print(f"\n[RAG] result {index}", flush=True)
-        print("  score =", score, flush=True)
-        print("  OCourse_no =", payload.get("OCourse_no"), flush=True)
-        print("  course =", payload.get("course"), flush=True)
-        print("  vdo_id =", payload.get("vdo_id"), flush=True)
-        print("  vdo_name =", payload.get("vdo_name"), flush=True)
-        print("  youtube_id =", payload.get("youtube_id"), flush=True)
-        print("  chunk_index =", payload.get("chunk_index"), flush=True)
-        print("  text_preview =", repr((payload.get("text") or "")[:300]), flush=True)
+        # print("  score =", score, flush=True)
+        # print("  OCourse_no =", payload.get("OCourse_no"), flush=True)
+        # print("  course =", payload.get("course"), flush=True)
+        # print("  vdo_id =", payload.get("vdo_id"), flush=True)
+        # print("  vdo_name =", payload.get("vdo_name"), flush=True)
+        # print("  youtube_id =", payload.get("youtube_id"), flush=True)
+        # print("  chunk_index =", payload.get("chunk_index"), flush=True)
+        # print("  text_preview =", repr((payload.get("text") or "")[:300]), flush=True)
 
         if score is not None and score < score_threshold:
             print("  SKIP: score below threshold", flush=True)
