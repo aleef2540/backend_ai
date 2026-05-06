@@ -75,9 +75,17 @@ async def fetch_instructor_context() -> list[dict]:
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(
             url,
-            headers={
-                "User-Agent": "Mozilla/5.0 AI Assistant"
-            }
+            headers = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.entraining.net/",
+    "Connection": "keep-alive",
+}
         )
 
     response.raise_for_status()
