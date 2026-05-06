@@ -285,7 +285,7 @@ JSON:
 """.strip()
 
     result = await call_openai_chat_full(
-        model="gpt-4.1-mini",
+        model="gpt-4.1-nano",
         system_prompt=system_prompt,
         user_prompt=user_message,
         temperature=0.1,
@@ -486,7 +486,7 @@ Requirement ผู้เรียน:
         model="gpt-4.1-mini",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        temperature=0.3,
+        temperature=0.7,
     ):
         yield item
 
@@ -883,7 +883,7 @@ async def reply_learning_feedback_stream(
         model="gpt-4.1-mini",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        temperature=0.3,
+        temperature=0.7,
     ):
         yield item
 

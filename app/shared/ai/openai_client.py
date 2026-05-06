@@ -43,6 +43,11 @@ def calculate_cost(
 
     if not pricing:
         return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "input_cost_usd": 0.0,
+            "output_cost_usd": 0.0,
             "total_cost_usd": 0.0,
             "total_cost_thb": 0.0,
         }

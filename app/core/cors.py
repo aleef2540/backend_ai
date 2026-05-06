@@ -5,6 +5,7 @@ origins = [
     "https://www.entraining.net",
     "https://entraining.net",
     "http://localhost",
+    "https://localhost",
     "http://127.0.0.1",
     "http://localhost:3000",
     "http://127.0.0.1:3000",

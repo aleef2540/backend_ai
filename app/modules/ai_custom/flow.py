@@ -40,95 +40,6 @@ def build_course_name_context(course_data) -> str:
 
     return ", ".join(names)
 
-def find_course_by_no(course_data, course_no):
-    if not course_no:
-        return None
-
-    try:
-        target_no = int(course_no)
-    except Exception:
-        return None
-
-    for row in course_data:
-        try:
-            row_no = int(row.get("course_no"))
-        except Exception:
-            row_no = None
-
-        if row_no == target_no:
-            return row
-
-    return None
-
-
-def detect_followup_type(message: str) -> str:
-    text = str(message or "").strip().lower()
-
-    summary_keywords = [
-        "สรุป", "ย่อ", "เอาแบบสั้น", "แบบสั้น", "สั้นๆ", "สั้น ๆ", "short summary"
-    ]
-    example_keywords = [
-        "ตัวอย่าง", "ยกตัวอย่าง", "example", "มีเคสไหม", "มีกรณีไหม"
-    ]
-    application_keywords = [
-        "เอาไปใช้", "นำไปใช้", "ใช้ยังไง", "ทำยังไง", "ควรทำยังไง",
-        "ปรับใช้", "ใช้กับงาน", "ใช้กับลูกทีม", "ประยุกต์ใช้"
-    ]
-    comparison_keywords = [
-        "ต่างจาก", "แตกต่าง", "เปรียบเทียบ", "เทียบกับ", "ดีกว่า", "เหมือนกันไหม"
-    ]
-    expand_keywords = [
-        "ขยาย", "เพิ่ม", "เพิ่มอีก", "อีกหน่อย", "เพิ่มเติม", "เล่าเพิ่ม", "อธิบายเพิ่ม"
-    ]
-
-    if any(k in text for k in summary_keywords):
-        return "summary"
-
-    if any(k in text for k in example_keywords):
-        return "example"
-
-    if any(k in text for k in application_keywords):
-        return "application"
-
-    if any(k in text for k in comparison_keywords):
-        return "comparison"
-
-    if any(k in text for k in expand_keywords):
-        return "expand"
-
-    return "expand"
-
-def map_followup_answer_type(followup_type: str) -> str:
-    mapping = {
-        "summary": "summary_given",
-        "example": "example_given",
-        "application": "application_given",
-        "comparison": "comparison_given",
-        "expand": "followup_expanded",
-    }
-    return mapping.get(followup_type, "followup_expanded")
-
-def build_application_message(user_message: str, state) -> str:
-    return (
-        f"{user_message}\n\n"
-        f"[ANSWER_MODE]: application\n"
-        f"[PREVIOUS_ANSWER]: {state.last_answer or ''}\n"
-        f"[PREVIOUS_INTENT]: {state.last_intent or ''}\n"
-        f"[PREVIOUS_ANSWER_TYPE]: {state.last_answer_type or ''}\n"
-        f"[INSTRUCTION]: ช่วยตอบในเชิงการนำไปใช้จริง วิธีเริ่มต้น ขั้นตอน หรือแนวทางปฏิบัติที่นำไปใช้กับงานได้"
-    )
-
-def build_summary_message(user_message: str, state) -> str:
-    return (
-        f"{user_message}\n\n"
-        f"[ANSWER_MODE]: summary\n"
-        f"[PREVIOUS_ANSWER]: {state.last_answer or ''}\n"
-        f"[PREVIOUS_INTENT]: {state.last_intent or ''}\n"
-        f"[PREVIOUS_ANSWER_TYPE]: {state.last_answer_type or ''}\n"
-        f"[INSTRUCTION]: ช่วยสรุปให้กระชับ เข้าใจง่าย เน้นใจความสำคัญ ไม่ต้องยาว"
-    )
-
-
 def load_allowed_course_context(course_use):
     """Load allowed course names from course_no list for discovery replies."""
     if not course_use:
@@ -180,7 +91,6 @@ def build_learning_journey_name(requirements: dict, topic: str = "", existing_na
         return f"เรียนรู้เรื่อง{topic}"
 
     return "Learning Journey"
-
 
 
 async def process_chat_aicustom_stream(req, state):
@@ -634,28 +544,6 @@ async def process_chat_aicustom_stream(req, state):
         rag_context = build_rag_context((rag_results or [])[:2])
 
         reply = ""
-
-        brief_message = f"""
-        ข้อความผู้เรียน:
-        {user_message}
-
-        Requirement ปัจจุบัน:
-        {json.dumps(state.requirements, ensure_ascii=False)}
-
-        Requirement ที่ยังขาด:
-        {json.dumps(missing, ensure_ascii=False)}
-
-        RAG_CONTEXT:
-        {rag_context}
-
-        คำสั่ง:
-        - ตอบจาก RAG_CONTEXT เท่านั้น
-        - ถ้าเนื้อหาใน RAG_CONTEXT ตรงกับสิ่งที่ผู้เรียนถาม ให้สรุปคร่าว ๆ 2-4 ประโยค
-        - อย่าตอบจัดเต็ม
-        - ไม่ต้องบอกว่าตอบจากเนื้อหาอะไร
-        - ห้ามดึง topic เก่าที่ไม่เกี่ยวข้องมาตอบ
-        - หลังจากสรุปคร่าว ๆ แล้ว ให้ถามต่อ 1 คำถามเท่านั้น เพื่อเก็บ requirement ที่ยังขาด คือ {json.dumps(missing, ensure_ascii=False)}
-        """.strip()
 
         async for item in reply_ask_concept_with_topic_stream_new(
             user_message=user_message,
