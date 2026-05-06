@@ -27,7 +27,7 @@ async def fetch_public_course_context() -> list[dict]:
     ):
         return _PUBLIC_COURSE_CACHE["items"]
 
-    url = "https://www.entraining.net/public-course/plan/all/"
+    url = "https://entstaffs.entraining.net/api/public-course/select_plan.php?month=all"
 
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(

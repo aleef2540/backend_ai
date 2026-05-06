@@ -110,6 +110,11 @@ async def handle_public_course_detail(req, state):
         state=state
     )
 
+    print("matched_course =", matched_course, flush=True)
+
+    if matched_course:
+        state.course_context["last_public_course"] = matched_course
+
     if not matched_course:
         reply = "อยากทราบรายละเอียดของหลักสูตรไหนครับ รบกวนพิมพ์ชื่อหลักสูตร หรือบอกหัวข้อที่สนใจเพิ่มเติมได้เลยครับ"
 
@@ -129,6 +134,10 @@ async def handle_public_course_detail(req, state):
         return
 
     course_url = (matched_course.get("course_url") or "").strip()
+    course_url = course_url.replace(
+    "https://www.entraining.net/public-course/",
+    "https://entstaffs.entraining.net/api/public-course/"
+)
 
     if not course_url:
         reply = "ยังไม่พบลิงก์รายละเอียดของหลักสูตรนี้ครับ"
@@ -146,10 +155,17 @@ async def handle_public_course_detail(req, state):
 
     course_detail_context = await fetch_public_course_detail(course_url)
 
+    original_course_url = course_url.replace(
+    "https://entstaffs.entraining.net/api/public-course/",
+    "https://www.entraining.net/public-course/"
+    )
+    course_detail_context["course_url"] = original_course_url
+
     merged_course_detail = {
         **matched_course,
         **course_detail_context,
     }
+
 
     state.course_context["course_type"] = "public"
     state.course_context["course_action"] = "detail"
@@ -164,8 +180,17 @@ async def handle_public_course_detail(req, state):
 - ใช้ข้อมูลชื่อหลักสูตร วันที่ ราคา ลิงก์สมัคร โบรชัวร์ และ course_outline ประกอบการตอบ
 - ห้ามแต่งข้อมูลที่ไม่มีใน context
 - ถ้าพูดถึงชื่อหลักสูตร ให้ทำเป็นลิงก์ HTML จาก course_url ที่ให้มา
-- ถ้ามี register_url ให้แนบลิงก์สมัครอบรม
-- ถ้ามี brochure_url ให้แนบลิงก์ดาวน์โหลดโบรชัวร์
+- รูปแบบลิงก์หลักสูตรต้องเป็น:
+<a href="URL" target="_blank" style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">ชื่อหลักสูตร</a>
+- ห้ามสร้าง URL เอง ถ้าไม่มี course_url
+- ห้ามนำชื่อ "ตารางอบรม Public Course เดือน ทั้งหมด 2569 | Entraining" ไปสร้างเป็นลิงก์หลักสูตร
+- ใช้ลิงก์ /public-course/{course_name} เฉพาะเมื่อเป็นชื่อหลักสูตรจริงเท่านั้น
+- ถ้ามี register_url ให้แนบลิงก์สมัครอบรม โดยใช้คำว่า:
+<a href="URL" target="_blank" style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">สมัครอบรม</a>
+- ถ้ามี brochure_url ให้แนบลิงก์ดาวน์โหลดโบรชัวร์ โดยใช้คำว่า:
+<a href="URL" target="_blank" style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">ดาวน์โหลดโบรชัวร์</a>
+- ถ้าพูดถึงตารางอบรมรวมทั้งหมด หรือภาพรวม Public Training ทั้งหมด ให้ใช้ลิงก์:
+<a href="https://www.entraining.net/public-course/plan/all/" target="_blank" style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">ตารางอบรม Public Training ทั้งหมด</a>
 - ห้ามใช้ markdown
 - ตอบแบบธรรมชาติ เหมือนเจ้าหน้าที่ช่วยแนะนำ
 - ตอบ 3-6 ประโยค
@@ -187,7 +212,7 @@ public_course_detail:
     reply = ""
 
     async for item in _stream_text_response(
-        model="gpt-4.1-mini",
+        model="gpt-4.1-nano",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.3,
@@ -806,7 +831,7 @@ public_course_context:
     reply = ""
 
     async for item in _stream_text_response(
-        model="gpt-4.1-mini",
+        model="gpt-4.1-nano",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.4,
