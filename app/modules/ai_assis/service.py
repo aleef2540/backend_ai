@@ -1,6 +1,7 @@
 import json
 from app.shared.ai.openai_client import call_openai_chat_full, call_openai_chat_stream_full
 from app.modules.ai_assis.company_service import fetch_company_profile_context
+from app.core.database import run_query_bridge
 
 
 REQUIRED_FIELDS = [
@@ -227,26 +228,79 @@ Requirement ปัจจุบัน:
 
 async def build_search_query(requirements: dict) -> str:
     system_prompt = """
-คุณคือ AI Sales Consultant
-ให้แปลง Requirement ลูกค้าเป็น search query สำหรับค้นหาหลักสูตรใน Vector Database
+คุณคือ AI Search Query Builder สำหรับค้นหาหลักสูตรอบรมใน Vector Database
 
-หลักการเขียน query:
-- เขียนเหมือนโจทย์ความต้องการของลูกค้า
-- รวมกลุ่มผู้เรียน ปัญหา เป้าหมาย และบริบทสำคัญ
-- ไม่ต้องยาวเกินไป
-- ใช้ภาษาไทยธรรมชาติ
-- ห้ามแต่งข้อมูลที่ไม่มีใน Requirement
-- ตอบเป็น query อย่างเดียว
+หน้าที่:
+- แปลง requirement ของลูกค้าให้เป็น "learning intent"
+- Query นี้จะถูกใช้ค้นจาก:
+  - วัตถุประสงค์หลักสูตร
+  - ผลลัพธ์ที่ผู้เรียนจะได้รับ
+  - pain point
+  - competency
+  - learning outcome
+
+กฎสำคัญ:
+- ห้ามใช้คำว่า:
+  หลักสูตร
+  อบรม
+  training
+  inhouse
+  public
+  สัมมนา
+
+- ห้ามสร้างชื่อหลักสูตร
+- ให้เน้น:
+  สิ่งที่องค์กรอยากพัฒนา
+  สิ่งที่ผู้เรียนอยากทำได้ดีขึ้น
+  ปัญหาที่อยากแก้
+  skill หรือ competency ที่ต้องการ
+
+- Query ต้องเหมือน "เป้าหมายการพัฒนา"
+
+ตัวอย่างที่ดี:
+- ใช้ AI เพิ่มประสิทธิภาพการทำงานและลดเวลาทำงานซ้ำ
+- พัฒนาภาวะผู้นำและการสื่อสารของหัวหน้างาน
+- เทคนิคการขายและการปิดการขายสำหรับทีมขาย
+- การบริหารทีมและการมอบหมายงาน
+- การใช้ ChatGPT และ Generative AI ในการทำงาน
+
+ตัวอย่างที่ห้าม:
+- หลักสูตร AI
+- inhouse leadership
+- อบรมการขาย
+
+ตอบเป็น query อย่างเดียว
 """.strip()
 
     result = await call_openai_chat_full(
         model="gpt-4.1-mini",
         system_prompt=system_prompt,
-        user_prompt=json.dumps(requirements or {}, ensure_ascii=False),
-        temperature=0.2,
+        user_prompt=json.dumps(
+            requirements or {},
+            ensure_ascii=False
+        ),
     )
 
-    return (result.get("content") or "").strip()
+    query = (result.get("content") or "").strip()
+
+    # clean เพิ่มอีกชั้น
+    banned_words = [
+        "หลักสูตร",
+        "อบรม",
+        "training",
+        "inhouse",
+        "public",
+        "สัมมนา",
+    ]
+
+    for word in banned_words:
+        query = query.replace(word, "")
+
+    query = " ".join(query.split()).strip()
+
+    print("FINAL SEARCH QUERY =", query, flush=True)
+
+    return query
 
 async def build_recommendation_reply(
     requirements: dict,
@@ -490,35 +544,87 @@ topic ก่อนหน้า:
     ):
         yield item
     
+def get_course_payload(course):
+    if isinstance(course, dict):
+        payload = course.get("payload") or course
+        return payload if isinstance(payload, dict) else {}
+
+    return {}
+
+def compact_course_for_prompt(course):
+    payload = get_course_payload(course)
+
+    return {
+        "course_no": (
+            payload.get("course_no")
+            or payload.get("OCourse_no")
+            or payload.get("id")
+        ),
+        "course_name": (
+            payload.get("course_name")
+            or payload.get("vdo_name")
+            or payload.get("Course_name")
+            or payload.get("title")
+        ),
+        "description": (
+            payload.get("description")
+            or payload.get("script")
+            or payload.get("content")
+            or ""
+        )[:700],
+    }
+
 
 async def build_next_question_topic(
     requirements: dict,
     missing: list,
     conversation_history: list | None = None,
-    matched_course: str | None = None  # <--- เพิ่มตัวแปรนี้
+    matched_course=None,
 ):
 
     clean_requirements = {
-    k: v for k, v in (requirements or {}).items()
-    if k != "matched_course"
-}
+        k: v for k, v in (requirements or {}).items()
+        if k not in [
+            "matched_course",
+            "primary_matched_course",
+            "last_inhouse_course",
+            "last_inhouse_course_detail",
+        ]
+    }
+
     conversation_context = build_conversation_context(conversation_history)
+
+    matched_courses = []
+
+    if isinstance(matched_course, list):
+        matched_courses = matched_course
+    elif matched_course:
+        matched_courses = [matched_course]
+
+    compact_courses = [
+        compact_course_for_prompt(course)
+        for course in matched_courses
+    ]
+
+    compact_courses = [
+        c for c in compact_courses
+        if c.get("course_name")
+    ]
 
     if not missing:
         system_prompt = """
 คุณคือ AI Sales Consultant สำหรับแนะนำหลักสูตรฝึกอบรม
 
-หน้าที่ของคุณ:
-- สรุปความต้องการของลูกค้าแบบสั้น กระชับ เป็นภาษาพูด
-- แนะนำหลักสูตรที่เหมาะสม ถ้ามี matched_course
-- ห้ามลิสต์ข้อมูลเป็น bullet
-- ห้ามแต่งขั้นตอนถัดไปเอง
-- ห้ามพูดเรื่องลงทะเบียน ถ้า user ยังไม่ได้ขอ
-- ห้ามพูดว่าทีมงานจะติดต่อกลับภายใน 24 ชั่วโมง
-- ตอบไม่เกิน 2-3 ประโยค
+หน้าที่:
+- ตอบจาก matched_courses เท่านั้น
+- ถ้ามีหลายหลักสูตร ให้แนะนำตัวที่เกี่ยวข้องที่สุด 1-3 ตัว
+- ห้ามบอกว่าไม่มีหลักสูตร ถ้า matched_courses มีข้อมูล
+- ห้ามเลือกหลักสูตรที่ไม่เกี่ยวข้องกับ Requirement
+- ห้ามใช้ bullet
+- ห้ามสร้าง CTA เอง
+- ห้ามพูดเรื่องลงทะเบียนหรือทีมงานติดต่อกลับ
+- ตอบแบบธรรมชาติ 2-3 ประโยค
 """.strip()
-
-        matched_info = f'\nหลักสูตรที่ระบบพบว่าใกล้เคียงที่สุด: {matched_course}' if matched_course else ""
 
         user_prompt = f"""
 บทสนทนาก่อนหน้า:
@@ -526,66 +632,60 @@ async def build_next_question_topic(
 
 Requirement ปัจจุบัน:
 {json.dumps(clean_requirements or {}, ensure_ascii=False)}
-{matched_info}
 
-ตอนนี้เก็บข้อมูลครบแล้ว ไม่ต้องถามข้อมูลเพิ่ม
+matched_courses:
+{json.dumps(compact_courses, ensure_ascii=False)}
+
+ตอนนี้มีหลักสูตรที่ระบบค้นเจอแล้ว ให้แนะนำจาก matched_courses เท่านั้น
+ถ้ามีหลายตัว ให้เลือกตัวที่ตรงกับ Requirement มากที่สุด
 ห้ามใช้ bullet
 ห้ามสรุปเป็นรายการ
-ห้ามสร้างข้อความ CTA เอง
 """.strip()
 
         async for item in _stream_text_response(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            temperature=0.55,
         ):
             yield item
 
         return
 
-
     next_field = missing[0]
     label = FIELD_LABELS.get(next_field, next_field)
 
-    # ปรับ System Prompt เล็กน้อยเพื่อให้ยอมรับการ "เสนอชื่อหลักสูตร"
     system_prompt = """
 คุณคือ AI Sales Consultant สำหรับแนะนำหลักสูตรฝึกอบรม
-หน้าที่ของคุณคือ:
-1. สะท้อนความเข้าใจในสิ่งที่ลูกค้าต้องการ
-2. แจ้งชื่อหลักสูตรที่ใกล้เคียงกับสิ่งที่ลูกค้าสนใจ (ถ้ามีข้อมูล matched_course)
-3. ถามข้อมูลที่ขาดอยู่ 1 ข้ออย่างเป็นธรรมชาติเพื่อให้แนะนำหลักสูตรได้ตรงจุดยิ่งขึ้น
 
-บุคลิก: มืออาชีพ, อบอุ่น, ไม่ถามเหมือนบอท, ห้ามลิสต์ทุกอย่างที่ขาด ไม่ค้องทักทายแล้วนี่เป็นบทสนมนาต่อเนื่อง
+หน้าที่:
+- สะท้อนความต้องการของลูกค้าแบบสั้น ๆ
+- ถ้ามี matched_courses ให้แนะนำหลักสูตรที่เหมาะสมจาก matched_courses เท่านั้น
+- ถามข้อมูลที่ขาดอยู่ 1 ข้ออย่างเป็นธรรมชาติ
+- ห้ามใช้ bullet
+- ห้ามถามหลายคำถาม
+- ตอบ 2-3 ประโยค
 """.strip()
 
-    # ปรับ User Prompt ให้ใส่ชื่อหลักสูตรที่เจอลงไป
-    matched_info = f"\nหลักสูตรที่ระบบพบว่าใกล้เคียงที่สุด: {matched_course}" if matched_course else ""
-    
     user_prompt = f"""
 บทสนทนาก่อนหน้า:
 {conversation_context}
 
 Requirement ปัจจุบัน:
 {json.dumps(clean_requirements or {}, ensure_ascii=False)}
-{matched_info} 
 
-ข้อมูลที่ต้องถามเพิ่มตอนนี้คือ: {label}
+matched_courses:
+{json.dumps(compact_courses, ensure_ascii=False)}
 
-คำแนะนำ: 
-- เริ่มจากสรุปความต้องการหรือปัญหาของลูกค้าจากบทสนทนาก่อนหน้าแบบสั้นๆ เป็นธรรมชาติ
-- จากนั้นถ้ามีชื่อหลักสูตรที่ใกล้เคียง ให้ค่อยแนะนำว่า หลักสูตร "{matched_course}" น่าจะเหมาะกับความต้องการนี้ ปิดท้ายด้วย "\n\n"
-- อย่าเริ่มต้นด้วยชื่อหลักสูตรทันที
-- จากนั้นถามเพื่อเก็บข้อมูล "{label}" ต่อไปแบบเนียนๆ
-- ตอบ 2-3 ประโยคเท่านั้น
-- ถามคำถามเดียวเท่านั้น
+ข้อมูลที่ต้องถามเพิ่มตอนนี้คือ:
+{label}
+
+ให้ตอบแบบธรรมชาติ โดยเลือกหลักสูตรที่เกี่ยวข้องที่สุดจาก matched_courses ถ้ามี แล้วถามต่อเรื่อง {label} เพียง 1 คำถาม
 """.strip()
 
     async for item in _stream_text_response(
-        model="gpt-4o-mini", # แนะนำให้เช็คชื่อ model อีกทีครับ ปกติจะเป็น gpt-4o-mini
+        model="gpt-4.1-mini",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        temperature=0.55,
     ):
         yield item
 
@@ -695,8 +795,13 @@ course_type:
 
 course_action:
 - overview = ผู้ใช้ถามภาพรวม รายชื่อหลักสูตร ตารางอบรม มีคอร์สอะไรบ้าง รอบอบรมเดือนนี้ เดือนหน้า
-- detail = ผู้ใช้ถามรายละเอียดหลักสูตร เนื้อหา เรียนอะไร หัวข้ออบรม วัตถุประสงค์ เหมาะกับใคร ได้อะไร
+- detail = ใช้เฉพาะเมื่อผู้ใช้ถามรายละเอียดของ "หลักสูตรที่ระบุชัดเจน" หรือ follow-up ถึงหลักสูตรเดิม เช่น "ขอรายละเอียดคอร์สนี้", "หลักสูตรนี้เรียนอะไร", "outline คอร์สนี้มีอะไร"
 - unknown = ยังไม่ชัดเจน
+
+กฎสำคัญสำหรับ inhouse:
+- ถ้า course_type=inhouse และผู้ใช้พูดว่า "อยากได้ที่...", "มีที่สอน...", "หาแบบที่...", "เน้น...", "เกี่ยวกับ..." ให้ตั้ง course_action=overview ไม่ใช่ detail
+- สำหรับ inhouse ให้ใช้ course_action=detail เฉพาะเมื่อผู้ใช้ถามรายละเอียดของหลักสูตรเดิมหรือชื่อหลักสูตรชัด
+
 
 instructor_action:
 - overview = ถามรายชื่อ/แนะนำวิทยากร
@@ -953,6 +1058,88 @@ async def handle_general_qa(req, state):
 
     return
 
+async def fetch_inhouse_course_detail(
+    course_id: str | int | None = None,
+    course_name: str | None = None,
+) -> dict:
+
+    print("\n===== START fetch_inhouse_course_detail =====", flush=True)
+    print("course_id =", course_id, flush=True)
+
+    if not course_id:
+        print("❌ no course_id", flush=True)
+        return {}
+
+    try:
+        course_id = int(str(course_id).strip())
+    except Exception:
+        print("❌ invalid course_id", flush=True)
+        return {}
+
+    sql = """
+        SELECT
+            *
+        FROM inhouse_course
+        WHERE ICourse_no = ?
+        LIMIT 1
+    """
+
+    rows = run_query_bridge(sql, [course_id])
+
+    print("DETAIL ROWS =", rows, flush=True)
+
+    if not rows:
+        print("❌ no rows", flush=True)
+        return {}
+
+    if (
+        isinstance(rows, list)
+        and len(rows) > 0
+        and isinstance(rows[0], dict)
+        and "error" in rows[0]
+    ):
+        print("❌ SQL ERROR =", rows[0], flush=True)
+        return {}
+
+    row = rows[0]
+
+    if not isinstance(row, dict):
+        print("❌ invalid row type", type(row), flush=True)
+        return {}
+
+    detail = {
+        "course_id": row.get("ICourse_no"),
+        "course_name": (
+            row.get("course_name")
+            or row.get("ICourse_name")
+            or ""
+        ),
+        "course_outline": (
+            row.get("course_outline")
+            or row.get("outline")
+            or ""
+        ),
+        "objective": (
+            row.get("objective")
+            or ""
+        ),
+        "target_group": (
+            row.get("target_group")
+            or ""
+        ),
+        "detail_text": (
+            row.get("detail_text")
+            or row.get("description")
+            or ""
+        ),
+        "raw": row,
+    }
+
+    print("✅ DETAIL =", detail, flush=True)
+    print("===== END fetch_inhouse_course_detail =====\n", flush=True)
+
+    return detail
+
 async def handle_irrelevant(req, state):
 
     user_message = (req.user_message or "").strip()
@@ -1023,6 +1210,193 @@ async def handle_irrelevant(req, state):
 
     return
 
+async def build_inhouse_discovery_reply(
+    user_message: str,
+    requirements: dict,
+    conversation_history: list | None = None,
+):
+    conversation_context = build_conversation_context(conversation_history)
+
+    system_prompt = """
+คุณคือ AI Sales Consultant ของเว็บไซต์ En-Training
+
+หน้าที่:
+- ช่วยลูกค้าที่สนใจหลักสูตร In-house Training
+- ตอบแบบที่ปรึกษา ไม่ใช่ chatbot แข็ง ๆ
+- ถ้ายังไม่รู้หัวข้อชัด ให้ช่วยชวนคุยเพื่อค้นหาโจทย์ ปัญหา หรือเป้าหมายของทีม
+- สามารถยกตัวอย่างหมวดหลักสูตรได้สั้น ๆ เช่น ภาวะผู้นำ การขาย การสื่อสาร การบริการ การทำงานเป็นทีม
+- ถามต่อเพียง 1 คำถาม
+- ห้ามใช้ markdown
+- ตอบ 2-4 ประโยค
+""".strip()
+
+    user_prompt = f"""
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+requirements:
+{json.dumps(requirements or {}, ensure_ascii=False)}
+
+ข้อความล่าสุดของผู้ใช้:
+{user_message}
+
+ช่วยตอบลูกค้าแบบที่ปรึกษาและถามต่อ 1 คำถาม
+""".strip()
+
+    async for item in _stream_text_response(
+        model="gpt-4o-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    ):
+        yield item
+
+
+async def build_inhouse_topic_not_found_reply(
+    user_message: str,
+    requirements: dict,
+    conversation_history: list | None = None,
+):
+    conversation_context = build_conversation_context(conversation_history)
+
+    system_prompt = """
+คุณคือ AI Sales Consultant ของเว็บไซต์ En-Training
+
+หน้าที่:
+- ตอบเมื่อลูกค้าสนใจ In-house Training แต่ระบบยังไม่พบหลักสูตรที่ตรงชัดเจน
+- ห้ามบอกแข็ง ๆ ว่าไม่มี
+- ให้ตอบแบบที่ปรึกษา และชวนลูกค้าขยายโจทย์อีกนิด
+- ถามต่อเพียง 1 คำถาม
+- ห้ามใช้ markdown
+- ตอบ 2-4 ประโยค
+""".strip()
+
+    user_prompt = f"""
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+requirements:
+{json.dumps(requirements or {}, ensure_ascii=False)}
+
+ข้อความล่าสุดของผู้ใช้:
+{user_message}
+
+ช่วยตอบแบบธรรมชาติและถามต่อเพื่อให้ค้นหาหลักสูตรได้ตรงขึ้น
+""".strip()
+
+    async for item in _stream_text_response(
+        model="gpt-4o-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    ):
+        yield 
+
+async def classify_inhouse_need(
+    user_message: str,
+    course_context: dict,
+    conversation_history: list | None = None,
+) -> dict:
+    conversation_context = build_conversation_context(conversation_history)
+
+    system_prompt = """
+คุณคือ In-house Training Need Classifier
+
+หน้าที่:
+- วิเคราะห์ว่าผู้ใช้ต้องการอะไรเกี่ยวกับ In-house Training
+- ห้ามตอบเป็นข้อความคุยกับลูกค้า
+- ตอบ JSON เท่านั้น
+
+need_type:
+- generic_interest = สนใจ inhouse กว้าง ๆ ยังไม่มีหัวข้อชัด เช่น แนะนำหลักสูตร inhouse ให้หน่อย
+- topic_search = มีหัวข้อหรือทักษะชัด เช่น AI, Leadership, Sales, Communication, หัวหน้างาน
+- pain_point_search = มีปัญหาหรือโจทย์ชัด เช่น ทีมขายปิดการขายไม่ได้ หัวหน้างานสื่อสารไม่ดี
+- detail_request = ขอรายละเอียดหลักสูตร เช่น รายละเอียดคอร์สนี้ outline เรียนอะไร
+- ask_more = ขอหลักสูตรเพิ่ม เช่น มีอีกไหม ขออีกตัวเลือก
+- quotation = ขอราคา ใบเสนอราคา จัดอบรม
+- unclear = ยังไม่ชัด
+
+ให้สกัด:
+- topic
+- pain_point
+- target_group
+- search_query
+- should_search
+
+กฎ:
+- ถ้าเป็นคำกว้าง เช่น "แนะนำ inhouse", "มีหลักสูตรอะไรบ้าง" โดยไม่มีหัวข้อ ให้ should_search=false
+- ถ้ามีหัวข้อเฉพาะ เช่น "AI", "Leadership", "การขาย", "สื่อสาร" ให้ should_search=true
+- ถ้าเป็น detail_request แต่ไม่มี matched_course เดิม ให้ should_search=false
+- search_query ต้องเป็นข้อความธรรมชาติสำหรับค้นหาหลักสูตร
+
+JSON:
+{
+  "need_type": "generic_interest",
+  "should_search": false,
+  "topic": "",
+  "pain_point": "",
+  "target_group": "",
+  "search_query": "",
+  "reason": ""
+}
+""".strip()
+
+    user_prompt = f"""
+ข้อความล่าสุด:
+{user_message}
+
+course_context:
+{json.dumps(course_context or {}, ensure_ascii=False)}
+
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+วิเคราะห์ความต้องการของผู้ใช้
+""".strip()
+
+    result = await call_openai_chat_full(
+        model="gpt-4.1-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+
+    text = (result.get("content") or "").strip()
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    try:
+        data = json.loads(text)
+    except Exception:
+        return {
+            "need_type": "unclear",
+            "should_search": False,
+            "topic": "",
+            "pain_point": "",
+            "target_group": "",
+            "search_query": "",
+            "reason": "parse_failed",
+        }
+
+    allowed = [
+        "generic_interest",
+        "topic_search",
+        "pain_point_search",
+        "detail_request",
+        "ask_more",
+        "quotation",
+        "unclear",
+    ]
+
+    need_type = data.get("need_type", "unclear")
+    if need_type not in allowed:
+        need_type = "unclear"
+
+    return {
+        "need_type": need_type,
+        "should_search": bool(data.get("should_search", False)),
+        "topic": data.get("topic", ""),
+        "pain_point": data.get("pain_point", ""),
+        "target_group": data.get("target_group", ""),
+        "search_query": data.get("search_query", ""),
+        "reason": data.get("reason", ""),
+    }
 # async def handle_instructor_search(req, state):
 
 #     user_message = (req.user_message or "").strip()

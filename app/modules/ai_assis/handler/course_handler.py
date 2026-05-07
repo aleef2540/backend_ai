@@ -7,12 +7,15 @@ from app.modules.ai_assis.service import (
     calc_missing_requirements,
     build_next_question,
     build_search_query,
-    build_recommendation_reply,
     build_next_question_topic,
     build_more_courses_reply,
     detect_post_recommend_intent,
     build_conversation_context,
     _stream_text_response,
+    build_inhouse_discovery_reply,
+    build_inhouse_topic_not_found_reply,
+    classify_inhouse_need,
+    fetch_inhouse_course_detail,
 )
 
 from app.modules.ai_assis.qdrant_service import (
@@ -34,6 +37,69 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"\s+", "", text)
     return text
 
+async def resolve_inhouse_course_from_qdrant(
+    user_message: str,
+    state,
+    limit: int = 5,
+) -> dict | None:
+
+    if not state.course_context:
+        state.course_context = {}
+
+    need = await classify_inhouse_need(
+        user_message=user_message,
+        course_context=state.course_context,
+        conversation_history=state.conversation_history,
+    )
+
+    search_query = (need.get("search_query") or "").strip()
+
+    if not search_query:
+        search_query = await build_search_query(state.course_context)
+
+    courses = await search_courses_from_qdrant(
+        search_query,
+        limit=limit,
+        excluded_courses=[]
+    )
+
+    if not courses:
+        return None
+
+    matched_course = courses[0]
+    payload = get_course_payload(matched_course)
+
+    course_id = (
+        payload.get("course_no")
+        or payload.get("OCourse_no")
+        or payload.get("id")
+    )
+
+    course_name = (
+        payload.get("course_name")
+        or payload.get("vdo_name")
+        or payload.get("Course_name")
+        or payload.get("title")
+    )
+
+    resolved = {
+        "course_id": course_id,
+        "course_name": course_name,
+        "course": matched_course,
+        "payload": payload,
+        "search_query": search_query,
+        "need": need,
+    }
+
+    state.course_context["last_inhouse_course"] = matched_course
+    state.course_context["last_inhouse_course_id"] = course_id
+    state.course_context["last_inhouse_course_name"] = course_name
+    state.course_context["last_inhouse_search_query"] = search_query
+
+    state.matched_course = matched_course
+    state.matched_course_id = course_id
+
+    return resolved
 
 async def match_public_course_by_ai(
     user_message: str,
@@ -162,6 +228,197 @@ def build_public_course_url(course_name: str) -> str:
     slug = re.sub(r"-+", "-", slug)
 
     return f"https://www.entraining.net/public-course/{slug}"
+
+async def handle_inhouse_course_detail(req, state):
+
+    user_message = (req.user_message or "").strip()
+    conversation_context = build_conversation_context(state.conversation_history)
+
+    if not state.course_context:
+        state.course_context = {}
+
+    course_context = state.course_context or {}
+
+    matched_course = (
+        course_context.get("last_inhouse_course")
+        or course_context.get("matched_course")
+        or getattr(state, "matched_course", None)
+    )
+
+    if isinstance(matched_course, list):
+        matched_course = matched_course[0] if matched_course else None
+
+    course_payload = get_course_payload(matched_course)
+
+    course_id = (
+        course_payload.get("course_no")
+        or course_payload.get("OCourse_no")
+        or course_payload.get("id")
+        or course_context.get("last_inhouse_course_id")
+        or getattr(state, "matched_course_id", None)
+    )
+
+    course_name = (
+        course_payload.get("course_name")
+        or course_payload.get("vdo_name")
+        or course_payload.get("Course_name")
+        or course_payload.get("title")
+        or course_context.get("last_inhouse_course_name")
+    )
+
+    if not course_id and not course_name:
+
+        resolved = await resolve_inhouse_course_from_qdrant(
+            user_message=user_message,
+            state=state,
+            limit=5,
+        )
+
+        if resolved:
+            matched_course = resolved.get("course")
+            course_payload = resolved.get("payload") or {}
+            course_id = resolved.get("course_id")
+            course_name = resolved.get("course_name")
+
+            state.course_context["last_inhouse_course"] = matched_course
+            state.course_context["last_inhouse_course_id"] = course_id
+            state.course_context["last_inhouse_course_name"] = course_name
+            state.course_context["last_inhouse_search_query"] = resolved.get("search_query")
+
+    if not course_id and not course_name:
+
+        reply = ""
+
+        async for item in build_inhouse_discovery_reply(
+            user_message=user_message,
+            requirements=course_context,
+            conversation_history=state.conversation_history,
+        ):
+            if item.get("type") == "chunk":
+                text = item.get("text", "")
+                reply += text
+                yield {
+                    "type": "chunk",
+                    "text": text,
+                }
+
+            elif item.get("type") == "done":
+                reply = item.get("content") or reply
+
+        state.mode = "course_discovery"
+        state.last_answer = reply
+        state.last_step = "inhouse_detail_need_course"
+
+        state.conversation_history.append({
+            "role": "assistant",
+            "content": reply
+        })
+
+        if len(state.conversation_history) > 10:
+            state.conversation_history = state.conversation_history[-10:]
+
+        yield {
+            "type": "done",
+            "reply": reply,
+            "status": "collecting_info",
+            "reason": "inhouse_detail_need_course",
+            "state": state,
+            "source": "ai_assistant_inhouse_detail",
+        }
+
+        return
+
+    course_detail = await fetch_inhouse_course_detail(
+        course_id=course_id,
+        course_name=course_name,
+    )
+
+    merged_course_detail = {
+        **course_payload,
+        **(course_detail or {}),
+    }
+
+    if course_id:
+        merged_course_detail["course_id"] = course_id
+
+    if course_name:
+        merged_course_detail["course_name"] = course_name
+
+    state.course_context["course_type"] = "inhouse"
+    state.course_context["course_action"] = "detail"
+    state.course_context["last_inhouse_course"] = matched_course
+    state.course_context["last_inhouse_course_id"] = course_id
+    state.course_context["last_inhouse_course_name"] = course_name
+    state.course_context["last_inhouse_course_detail"] = merged_course_detail
+
+    system_prompt = """
+คุณคือ AI Sales Consultant ของเว็บไซต์ En-Training
+
+หน้าที่:
+- ตอบรายละเอียดหลักสูตร In-house Training จาก inhouse_course_detail เท่านั้น
+- ใช้ข้อมูลชื่อหลักสูตร วัตถุประสงค์ เนื้อหา กลุ่มเป้าหมาย และรายละเอียดที่มีใน context
+- ถ้า detail ยังมีน้อย ให้ตอบจากข้อมูลที่มี และถามต่ออย่างสุภาพว่าต้องการปรับหลักสูตรให้เหมาะกับกลุ่มผู้เรียนแบบไหน
+- ห้ามแต่งข้อมูลที่ไม่มีใน context
+- ห้ามบอกว่าจะติดต่อกลับภายในเวลาที่แน่นอน
+- ห้ามใช้ markdown
+- ตอบแบบธรรมชาติ เหมือนที่ปรึกษาฝึกอบรม
+- ตอบ 3-6 ประโยค
+""".strip()
+
+    user_prompt = f"""
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+inhouse_course_detail:
+{json.dumps(merged_course_detail, ensure_ascii=False)}
+
+ข้อความล่าสุดของผู้ใช้:
+{user_message}
+
+ช่วยตอบรายละเอียดหลักสูตร In-house จาก inhouse_course_detail เท่านั้น
+""".strip()
+
+    reply = ""
+
+    async for item in _stream_text_response(
+        model="gpt-4o-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    ):
+        if item.get("type") == "chunk":
+            text = item.get("text", "")
+            reply += text
+
+            yield {
+                "type": "chunk",
+                "text": text,
+            }
+
+        elif item.get("type") == "done":
+            reply = item.get("content") or reply
+
+    state.mode = "inhouse_course_detail"
+    state.last_answer = reply
+    state.last_step = "inhouse_course_detail"
+
+    state.conversation_history.append({
+        "role": "assistant",
+        "content": reply
+    })
+
+    if len(state.conversation_history) > 10:
+        state.conversation_history = state.conversation_history[-10:]
+
+    yield {
+        "type": "done",
+        "reply": reply,
+        "status": "answered",
+        "reason": "inhouse_course_detail",
+        "state": state,
+        "source": "ai_assistant_inhouse_detail",
+    }
+
+    return
 
 async def handle_public_course_detail(req, state):
     user_message = (req.user_message or "").strip()
@@ -328,446 +585,58 @@ async def handle_inhouse_course_search(req, state):
 
     user_message = (req.user_message or "").strip()
 
-    skip_extract = False
+    if not state.course_context:
+        state.course_context = {}
 
-    # =========================
-    # POST RECOMMEND FOLLOW-UP
-    # =========================
-    if state.mode == "course_post_recommend":
+    state.course_context["course_type"] = "inhouse"
 
-        post_intent = await detect_post_recommend_intent(
-            user_message=user_message,
-            requirements=state.course_context or {},
-            conversation_history=state.conversation_history
-        )
+    need = await classify_inhouse_need(
+        user_message=user_message,
+        course_context=state.course_context,
+        conversation_history=state.conversation_history,
+    )
 
-        print("COURSE POST RECOMMEND INTENT =", post_intent, flush=True)
+    print("INHOUSE NEED =", need, flush=True)
 
-        intent = post_intent.get("intent", "unclear")
-        state.last_step = intent
+    need_type = need.get("need_type", "unclear")
+    should_search = need.get("should_search", False)
 
-        if intent == "new_requirement":
+    if need.get("topic"):
+        state.course_context["topic"] = need.get("topic")
 
-            state.course_context = {}
-            state.recommended_courses = []
-            state.recommended_course_cta = []
-            state.matched_course = None
-            state.matched_course_id = None
-            state.mode = "course_discovery"
+    if need.get("pain_point"):
+        state.course_context["pain_point"] = need.get("pain_point")
 
-            state.conversation_history = [{
-                "role": "user",
-                "content": user_message
-            }]
+    if need.get("target_group"):
+        state.course_context["target_group"] = need.get("target_group")
 
-        elif intent == "ask_more_courses":
+    state.course_context["inhouse_need_type"] = need_type
 
-            skip_extract = True
-            state.mode = "course_discovery"
-            state.last_step = "ask_more_courses"
-
-        elif intent == "refine_requirement":
-
-            state.mode = "course_discovery"
-
-        else:
-
-            state.mode = "course_discovery"
-
-    # =========================
-    # NORMAL COURSE DISCOVERY
-    # =========================
-    if not skip_extract:
-
-        old_context = dict(state.course_context or {})
-
-        old_req = " ".join(
-            str(v).strip()
-            for k, v in sorted(old_context.items())
-            if k not in [
-                "matched_course",
-                "missing_requirements",
-                "requirement_ready",
-                "search_query",
-                "course_type",
-            ] and v
-        ).strip()
-
-        new_context = await extract_requirements(
-            user_message=user_message,
-            current_requirements=state.course_context or {},
-            conversation_history=state.conversation_history
-        )
-
-        new_req = " ".join(
-            str(v).strip()
-            for k, v in sorted((new_context or {}).items())
-            if k not in [
-                "matched_course",
-                "missing_requirements",
-                "requirement_ready",
-                "search_query",
-                "course_type",
-            ] and v
-        ).strip()
-
-        if "course_type" not in new_context:
-            new_context["course_type"] = "inhouse"
-
-        state.course_context = new_context
-
-        new_topic = new_context.get("topic")
-        old_topic = old_context.get("topic")
-
-        print(
-            f"COURSE REQ CHECK | old_req={old_req} | new_req={new_req}",
-            flush=True
-        )
-
-        topic_check_courses = None
-        course_id = None
-
-        missing = calc_missing_requirements(state.course_context)
-
-        state.course_context["missing_requirements"] = missing
-        state.course_context["requirement_ready"] = len(missing) == 0
-
-        # =========================
-        # CASE: NO REQUIREMENT YET
-        # =========================
-        if not new_req:
-
-            if missing:
-
-                reply = ""
-
-                async for item in build_next_question(
-                    state.course_context,
-                    missing,
-                    state.conversation_history
-                ):
-                    if item.get("type") == "chunk":
-                        text = item.get("text", "")
-                        reply += text
-
-                        yield {
-                            "type": "chunk",
-                            "text": text
-                        }
-
-                    elif item.get("type") == "done":
-                        reply = item.get("content") or reply
-
-                state.mode = "course_discovery"
-                state.last_answer = reply
-                state.last_step = "course_ask_requirement"
-
-                state.conversation_history.append({
-                    "role": "assistant",
-                    "content": reply
-                })
-
-                if len(state.conversation_history) > 10:
-                    state.conversation_history = state.conversation_history[-10:]
-
-                yield {
-                    "type": "done",
-                    "reply": reply,
-                    "status": "collecting_info",
-                    "reason": "missing_course_requirement",
-                    "state": state,
-                    "source": "ai_assistant_course_discovery",
-                }
-
-                return
-
-            state.mode = "course_post_recommend"
-
-        # =========================
-        # IMPORTANT: CHECK TOPIC FIRST
-        # =========================
-        if new_req and new_req != old_req:
-
-            topic_check_courses, course_id = await check_topic_exists_in_qdrant(
-                new_req,
-                limit=1
-            )
-
-        elif new_req and old_req and new_req == old_req:
-
-            topic_check_courses = state.course_context.get("matched_course")
-            course_id = getattr(state, "matched_course_id", None)
-
-        # =========================
-        # TOPIC NOT FOUND
-        # =========================
-        if new_req and new_topic and not topic_check_courses and not old_topic:
-
-            reply = (
-                "ตอนนี้ยังไม่พบหลักสูตรที่ตรงกับหัวข้อนี้โดยตรงครับ "
-                "ลองบอกหัวข้อหรือทักษะที่อยากพัฒนาเพิ่มเติมอีกนิดได้ไหมครับ"
-            )
-
-            state.last_answer = reply
-            state.last_step = "course_topic_not_found"
-            state.mode = "course_post_recommend"
-
-            state.conversation_history.append({
-                "role": "assistant",
-                "content": reply
-            })
-
-            if len(state.conversation_history) > 10:
-                state.conversation_history = state.conversation_history[-10:]
-
-            yield {
-                "type": "done",
-                "reply": reply,
-                "status": "irrelevant",
-                "reason": "course_topic_not_found",
-                "state": state,
-                "source": "ai_assistant_course",
-            }
-
-            return
-
-        # =========================
-        # TOPIC FOUND: RECOMMEND FIRST, THEN ASK
-        # =========================
-        if topic_check_courses:
-
-            state.course_context = new_context
-            state.course_context["topic"] = new_topic
-            state.course_context["matched_course"] = topic_check_courses
-
-            missing = calc_missing_requirements(state.course_context)
-
-            state.course_context["missing_requirements"] = missing
-            state.course_context["requirement_ready"] = len(missing) == 0
-
-            reply = ""
-
-            async for item in build_next_question_topic(
-                requirements=state.course_context,
-                missing=missing,
-                conversation_history=state.conversation_history,
-                matched_course=state.course_context.get("matched_course")
-            ):
-                if item.get("type") == "chunk":
-                    text = item.get("text", "")
-                    reply += text
-
-                    yield {
-                        "type": "chunk",
-                        "text": text
-                    }
-
-                elif item.get("type") == "done":
-                    reply = item.get("content") or reply
-
-            state.last_answer = reply
-            state.matched_course = state.course_context["matched_course"]
-            state.matched_course_id = course_id
-            state.last_step = "course_ask_requirement_topic"
-
-            old_courses = state.recommended_courses or []
-
-            exists_ids = set()
-
-            for course in old_courses:
-                cid = get_course_id(course)
-                if cid:
-                    exists_ids.add(str(cid))
-
-            matched_payload = get_course_payload(topic_check_courses)
-
-            matched_course_id = (
-                matched_payload.get("course_no")
-                or matched_payload.get("OCourse_no")
-                or matched_payload.get("id")
-                or course_id
-            )
-
-            if matched_course_id and str(matched_course_id) not in exists_ids:
-                state.recommended_courses = old_courses + [topic_check_courses]
-            else:
-                state.recommended_courses = old_courses
-
-            if not missing:
-                state.mode = "course_post_recommend"
-                status = "ready_to_recommend"
-                reason = "course_requirement_complete"
-            else:
-                state.mode = "course_discovery"
-                status = "collecting_info"
-                reason = "matched_course_need_more_info"
-
-            state.conversation_history.append({
-                "role": "assistant",
-                "content": reply
-            })
-
-            if len(state.conversation_history) > 10:
-                state.conversation_history = state.conversation_history[-10:]
-
-            yield {
-                "type": "done",
-                "reply": reply,
-                "status": status,
-                "reason": reason,
-                "state": state,
-                "source": "ai_assistant_course_discovery",
-            }
-
-            return
-
-        if old_topic:
-            new_context["topic"] = old_topic
-            state.course_context = new_context
-            print(f"COURSE KEEP OLD TOPIC: {old_topic}", flush=True)
-
-    # =========================
-    # ASK MORE COURSES
-    # =========================
-    else:
-
-        search_query = await build_search_query(state.course_context)
-
-        state.course_context["search_query"] = search_query
-
-        excluded_courses = []
-
-        for course in state.recommended_courses or []:
-            course_no = get_course_id(course)
-            if course_no:
-                excluded_courses.append(str(course_no))
-
-        courses = await search_courses_from_qdrant(
-            search_query,
-            limit=1,
-            excluded_courses=excluded_courses
-        )
-
-        if courses:
-
-            first_course = courses[0]
-            payload = get_course_payload(first_course)
-
-            if payload:
-
-                new_course_id = (
-                    payload.get("course_no")
-                    or payload.get("OCourse_no")
-                    or payload.get("id")
-                )
-
-                new_course_name = (
-                    payload.get("course_name")
-                    or payload.get("vdo_name")
-                    or payload.get("Course_name")
-                    or payload.get("title")
-                )
-
-                state.matched_course = new_course_name
-                state.matched_course_id = new_course_id
-
-                if state.course_context is None:
-                    state.course_context = {}
-
-                state.course_context["matched_course"] = new_course_name
-
-        old_courses = state.recommended_courses or []
-        merged_courses = []
-        seen_course_ids = set()
-
-        for course in old_courses + (courses or []):
-            course_no = get_course_id(course)
-
-            if course_no:
-                key = str(course_no)
-                if key in seen_course_ids:
-                    continue
-
-                seen_course_ids.add(key)
-
-            merged_courses.append(course)
-
-        state.recommended_courses = merged_courses
-
-        course_cta = []
-
-        for c in courses or []:
-
-            payload = get_course_payload(c)
-
-            if not payload:
-                continue
-
-            course_no = (
-                payload.get("course_no")
-                or payload.get("OCourse_no")
-                or payload.get("id")
-            )
-
-            course_name = (
-                payload.get("course_name")
-                or payload.get("vdo_name")
-                or payload.get("Course_name")
-                or payload.get("title")
-            )
-
-            if course_no and course_name:
-                course_cta.append({
-                    "course_no": course_no,
-                    "course_name": course_name,
-                })
-
-        old_cta = state.recommended_course_cta or []
-        merged_cta = []
-        seen = set()
-
-        for c in old_cta + course_cta:
-
-            course_no = c.get("course_no")
-
-            if not course_no:
-                continue
-
-            course_no_key = str(course_no)
-
-            if course_no_key in seen:
-                continue
-
-            seen.add(course_no_key)
-
-            merged_cta.append({
-                "course_no": course_no,
-                "course_name": c.get("course_name", "")
-            })
-
-        state.recommended_course_cta = merged_cta
+    # 1) ยังไม่ควร search ให้ AI ชวนคุยก่อน
+    if not should_search:
 
         reply = ""
 
-        async for item in build_more_courses_reply(
+        async for item in build_inhouse_discovery_reply(
+            user_message=user_message,
             requirements=state.course_context,
-            courses=courses
+            conversation_history=state.conversation_history,
         ):
             if item.get("type") == "chunk":
                 text = item.get("text", "")
                 reply += text
-
                 yield {
                     "type": "chunk",
-                    "text": text
+                    "text": text,
                 }
 
             elif item.get("type") == "done":
                 reply = item.get("content") or reply
 
-        state.mode = "course_post_recommend"
+        state.mode = "course_discovery"
         state.last_answer = reply
-        state.last_step = "course_ask_more_courses"
+        state.last_step = "inhouse_discovery"
+        state.course_context["course_stage"] = "discover"
 
         state.conversation_history.append({
             "role": "assistant",
@@ -780,13 +649,157 @@ async def handle_inhouse_course_search(req, state):
         yield {
             "type": "done",
             "reply": reply,
-            "status": "recommended",
-            "reason": "ask_more_courses",
+            "status": "collecting_info",
+            "reason": "inhouse_discovery",
             "state": state,
-            "source": "ai_assistant_course_qdrant",
+            "source": "ai_assistant_inhouse",
         }
 
         return
+
+    # 2) AI บอกว่าควร search แล้ว
+    search_query = (need.get("search_query") or "").strip()
+
+    if not search_query:
+        search_query = await build_search_query(state.course_context)
+
+    state.course_context["search_query"] = search_query
+
+    print("INHOUSE SEARCH QUERY =", search_query, flush=True)
+
+    topic_check_courses, course_id = await check_topic_exists_in_qdrant(
+        search_query,
+        limit=5
+    )
+
+    # 3) ไม่พบหลักสูตร ให้ AI ถาม refine
+    if not topic_check_courses:
+
+        reply = ""
+
+        async for item in build_inhouse_topic_not_found_reply(
+            user_message=user_message,
+            requirements=state.course_context,
+            conversation_history=state.conversation_history,
+        ):
+            if item.get("type") == "chunk":
+                text = item.get("text", "")
+                reply += text
+                yield {
+                    "type": "chunk",
+                    "text": text,
+                }
+
+            elif item.get("type") == "done":
+                reply = item.get("content") or reply
+
+        state.mode = "course_discovery"
+        state.last_answer = reply
+        state.last_step = "inhouse_topic_not_found"
+        state.course_context["course_stage"] = "refine"
+
+        state.conversation_history.append({
+            "role": "assistant",
+            "content": reply
+        })
+
+        if len(state.conversation_history) > 10:
+            state.conversation_history = state.conversation_history[-10:]
+
+        yield {
+            "type": "done",
+            "reply": reply,
+            "status": "collecting_info",
+            "reason": "inhouse_topic_not_found",
+            "state": state,
+            "source": "ai_assistant_inhouse",
+        }
+
+        return
+
+    matched_courses = (
+        topic_check_courses
+        if isinstance(topic_check_courses, list)
+        else [topic_check_courses]
+    )
+
+    matched_courses = [c for c in matched_courses if c]
+    matched_courses = matched_courses[:2]
+    print("matched_course =", matched_courses, flush=True)
+    state.course_context["matched_course"] = matched_courses
+    state.course_context["course_stage"] = "matched"
+    state.recommended_courses = matched_courses
+    state.recommended_course_cta = []
+
+    course_cta = []
+
+    for course in matched_courses:
+        payload = get_course_payload(course)
+
+        course_no = (
+            payload.get("course_no")
+            or payload.get("OCourse_no")
+            or payload.get("id")
+        )
+
+        course_name = (
+            payload.get("course_name")
+            or payload.get("vdo_name")
+            or payload.get("Course_name")
+            or payload.get("title")
+        )
+
+        if course_no and course_name:
+            course_cta.append({
+                "course_no": course_no,
+                "course_name": course_name,
+            })
+
+    state.recommended_course_cta = course_cta
+
+    reply = ""
+
+    async for item in build_next_question_topic(
+        requirements=state.course_context,
+        missing=[],
+        conversation_history=state.conversation_history,
+        matched_course=matched_courses
+    ):
+        if item.get("type") == "chunk":
+            text = item.get("text", "")
+            reply += text
+            yield {
+                "type": "chunk",
+                "text": text,
+            }
+
+        elif item.get("type") == "done":
+            reply = item.get("content") or reply
+
+    state.last_answer = reply
+    state.matched_course = matched_courses
+    state.matched_course_id = course_id
+    state.last_step = "inhouse_course_matched"
+    state.mode = "course_post_recommend"
+
+    state.conversation_history.append({
+        "role": "assistant",
+        "content": reply
+    })
+
+    if len(state.conversation_history) > 10:
+        state.conversation_history = state.conversation_history[-10:]
+
+    yield {
+        "type": "done",
+        "reply": reply,
+        "status": "recommended",
+        "reason": "inhouse_course_matched",
+        "state": state,
+        "source": "ai_assistant_course_qdrant",
+    }
+
+    return
 
 async def handle_public_course_search(req, state):
 
@@ -948,11 +961,15 @@ async def handle_course_search(req, state):
 
     course_context = getattr(state, "course_context", {}) or {}
     course_type = course_context.get("course_type") or "unknown"
-    course_action = getattr(state, "course_context", {}).get("course_action", "unknown")
+    course_action = course_context.get("course_action") or "overview"
 
     if course_type == "public":
+
         if course_action == "detail":
-            async for item in handle_public_course_detail(req=req, state=state):
+            async for item in handle_public_course_detail(
+                req=req,
+                state=state
+            ):
                 yield item
             return
 
@@ -961,17 +978,23 @@ async def handle_course_search(req, state):
             state=state
         ):
             yield item
-
         return
 
     if course_type == "inhouse":
+
+        if course_action == "detail":
+            async for item in handle_inhouse_course_detail(
+                req=req,
+                state=state
+            ):
+                yield item
+            return
 
         async for item in handle_inhouse_course_search(
             req=req,
             state=state
         ):
             yield item
-
         return
 
     async for item in ask_course_type(

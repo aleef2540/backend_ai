@@ -29,16 +29,11 @@ def embed_text_openai(text: str):
 
 async def check_topic_exists_in_qdrant(
     topic: str,
-    limit: int = 1,
+    limit: int = 5,
     min_score: float = 0.35
-) -> bool:
-    """
-    ใช้เช็คว่า topic นี้มีข้อมูลใน Qdrant หรือไม่
-    แยกจาก search_courses_from_qdrant โดยสิ้นเชิง
-    """
-
+):
     if not topic or not topic.strip():
-        return False
+        return [], None
 
     vector = embed_text_openai(topic.strip())
 
@@ -50,30 +45,44 @@ async def check_topic_exists_in_qdrant(
     )
 
     if not hits.points:
-        return False
+        return [], None
 
-    best_score = hits.points[0].score or 0
+    matched_courses = []
 
-    print(
-        f"TOPIC CHECK | topic={topic} | score={best_score}",
-        flush=True
-    )
-
-     # แสดงรายละเอียดของหลักสูตรที่ตรงกับ topic
     for hit in hits.points:
-        course_name = hit.payload.get('course_name', 'ไม่มีข้อมูลชื่อหลักสูตร')
-        course_id = hit.payload.get('course_id', 'ไม่มีข้อมูล ID')
+        payload = hit.payload or {}
         score = hit.score or 0
 
-        print(f"  - Found Course: {course_name}")
-        print(f"    Score: {score}", flush=True)
+        if score < min_score:
+            continue
 
+        course_id = (
+            payload.get("course_id")
+            or payload.get("ICourse_no")
+            or payload.get("course_no")
+            or payload.get("id")
+        )
 
-    # ตรวจสอบเงื่อนไขคะแนน
-    if best_score >= min_score:
-        return course_name, course_id
-    else:
-        return "", ""
+        course_name = (
+            payload.get("course_name")
+            or payload.get("title")
+            or ""
+        )
+
+        if not course_id:
+            continue
+
+        matched_courses.append({
+            "course_id": course_id,
+            "course_name": course_name,
+            "score": score,
+            "payload": payload,
+        })
+
+    if not matched_courses:
+        return [], None
+
+    return matched_courses, matched_courses[0]["course_id"]
 
 async def search_courses_from_qdrant(query: str, limit: int = 3, excluded_courses: list = []):
     vector = embed_text_openai(query)
