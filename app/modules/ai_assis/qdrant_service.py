@@ -47,11 +47,18 @@ async def check_topic_exists_in_qdrant(
     if not hits.points:
         return [], None
 
+    best_score = hits.points[0].score or 0 
+    print( f"TOPIC CHECK | topic={topic} | score={best_score}", flush=True )
+
     matched_courses = []
 
     for hit in hits.points:
+        course_name = hit.payload.get('course_name', 'ไม่มีข้อมูลชื่อหลักสูตร')
         payload = hit.payload or {}
         score = hit.score or 0
+
+        print(f" - Found Course: {course_name}") 
+        print(f" Score: {score}", flush=True)
 
         if score < min_score:
             continue

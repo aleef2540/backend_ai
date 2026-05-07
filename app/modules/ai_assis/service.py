@@ -228,62 +228,56 @@ Requirement ปัจจุบัน:
 
 async def build_search_query(requirements: dict) -> str:
     system_prompt = """
-คุณคือ AI Search Query Builder สำหรับค้นหาหลักสูตรอบรมใน Vector Database
+คุณคือ AI Course Name Query Builder
 
 หน้าที่:
-- แปลง requirement ของลูกค้าให้เป็น "learning intent"
-- Query นี้จะถูกใช้ค้นจาก:
-  - วัตถุประสงค์หลักสูตร
-  - ผลลัพธ์ที่ผู้เรียนจะได้รับ
-  - pain point
-  - competency
-  - learning outcome
+- สร้าง search query สำหรับค้นจาก "ชื่อหลักสูตร"
+- ถ้าผู้ใช้พิมพ์ชื่อหลักสูตรมาชัดเจน ให้ใช้ชื่อนั้นหรือส่วนสำคัญของชื่อนั้น
+- ถ้าผู้ใช้พิมพ์เป็นความต้องการ ให้แปลงเป็นชื่อหลักสูตรที่น่าจะมี
+- Query ต้องคล้ายชื่อหลักสูตร ไม่ใช่วัตถุประสงค์ยาว ๆ
+- ใช้ได้ทั้งไทยและอังกฤษ
+- ห้ามใส่คำฟุ่มเฟือย เช่น หลักสูตร อบรม inhouse public training สัมมนา
+- ตอบสั้น ไม่เกิน 6 คำ
 
-กฎสำคัญ:
-- ห้ามใช้คำว่า:
-  หลักสูตร
-  อบรม
-  training
-  inhouse
-  public
-  สัมมนา
+ตัวอย่าง:
+ผู้ใช้ถามเรื่อง AI
+=> AI Development
 
-- ห้ามสร้างชื่อหลักสูตร
-- ให้เน้น:
-  สิ่งที่องค์กรอยากพัฒนา
-  สิ่งที่ผู้เรียนอยากทำได้ดีขึ้น
-  ปัญหาที่อยากแก้
-  skill หรือ competency ที่ต้องการ
+ผู้ใช้ถามเรื่องการใช้งาน AI
+=> AI Development
 
-- Query ต้องเหมือน "เป้าหมายการพัฒนา"
+ผู้ใช้ถามเรื่อง ChatGPT
+=> ChatGPT
 
-ตัวอย่างที่ดี:
-- ใช้ AI เพิ่มประสิทธิภาพการทำงานและลดเวลาทำงานซ้ำ
-- พัฒนาภาวะผู้นำและการสื่อสารของหัวหน้างาน
-- เทคนิคการขายและการปิดการขายสำหรับทีมขาย
-- การบริหารทีมและการมอบหมายงาน
-- การใช้ ChatGPT และ Generative AI ในการทำงาน
+ผู้ใช้ถามเรื่องหัวหน้างาน
+=> หัวหน้างาน
 
-ตัวอย่างที่ห้าม:
-- หลักสูตร AI
-- inhouse leadership
-- อบรมการขาย
+ผู้ใช้ถามเรื่อง leadership
+=> Leadership
 
-ตอบเป็น query อย่างเดียว
+ผู้ใช้ถามเรื่องทีมขาย
+=> Sales
+
+ผู้ใช้ถามเรื่องการโค้ช
+=> Coaching
+
+ผู้ใช้พิมพ์ "AI Development Path"
+=> AI Development Path
+
+ผู้ใช้พิมพ์ "Strategic AI for Leaders"
+=> Strategic AI for Leaders
+
+ตอบเป็น search query อย่างเดียว
 """.strip()
 
     result = await call_openai_chat_full(
         model="gpt-4.1-mini",
         system_prompt=system_prompt,
-        user_prompt=json.dumps(
-            requirements or {},
-            ensure_ascii=False
-        ),
+        user_prompt=json.dumps(requirements or {}, ensure_ascii=False),
     )
 
     query = (result.get("content") or "").strip()
 
-    # clean เพิ่มอีกชั้น
     banned_words = [
         "หลักสูตร",
         "อบรม",
@@ -291,6 +285,8 @@ async def build_search_query(requirements: dict) -> str:
         "inhouse",
         "public",
         "สัมมนา",
+        "คอร์ส",
+        "เกี่ยวกับ",
     ]
 
     for word in banned_words:
@@ -551,27 +547,57 @@ def get_course_payload(course):
 
     return {}
 
-def compact_course_for_prompt(course):
-    payload = get_course_payload(course)
+def compact_course_for_prompt(course: dict) -> dict:
+    if not isinstance(course, dict):
+        return {
+            "course_id": None,
+            "course_name": str(course or ""),
+            "detail_link": None,
+            "outline_link": None,
+            "detail_url": None,
+            "outline_url": None,
+            "description": "",
+            "course_outline": "",
+            "instructor": "",
+        }
+
+    payload = course.get("payload") or course
 
     return {
-        "course_no": (
-            payload.get("course_no")
-            or payload.get("OCourse_no")
-            or payload.get("id")
+        "course_id": (
+            course.get("course_id")
+            or payload.get("course_id")
+            or payload.get("ICourse_no")
         ),
         "course_name": (
-            payload.get("course_name")
-            or payload.get("vdo_name")
-            or payload.get("Course_name")
-            or payload.get("title")
-        ),
-        "description": (
-            payload.get("description")
-            or payload.get("script")
-            or payload.get("content")
+            course.get("course_name")
+            or payload.get("course_name")
+            or payload.get("ICourse_nameEN")
+            or payload.get("ICourse_nameTH")
             or ""
-        )[:700],
+        ),
+        "detail_link": course.get("detail_link") or payload.get("detail_link"),
+        "outline_link": course.get("outline_link") or payload.get("outline_link"),
+        "detail_url": course.get("detail_url") or payload.get("detail_url"),
+        "outline_url": course.get("outline_url") or payload.get("outline_url"),
+        "description": (
+            course.get("description")
+            or payload.get("ICourse_description")
+            or payload.get("description")
+            or ""
+        ),
+        "course_outline": (
+            course.get("course_outline")
+            or payload.get("ICourse_outline")
+            or payload.get("course_outline")
+            or ""
+        ),
+        "instructor": (
+            course.get("instructor")
+            or payload.get("ICourse_instructor")
+            or payload.get("instructor")
+            or ""
+        ),
     }
 
 
@@ -589,6 +615,8 @@ async def build_next_question_topic(
             "primary_matched_course",
             "last_inhouse_course",
             "last_inhouse_course_detail",
+            "recommended_courses",
+            "recommended_course_cta",
         ]
     }
 
@@ -611,19 +639,45 @@ async def build_next_question_topic(
         if c.get("course_name")
     ]
 
+    best_course = compact_courses[0] if compact_courses else {}
+
+    ai_courses = []
+
+    for c in compact_courses:
+        ai_courses.append({
+            "course_id": c.get("course_id"),
+            "course_name": c.get("course_name"),
+
+            # IMPORTANT
+            "detail_link": c.get("detail_link"),
+            "outline_link": c.get("outline_link"),
+            "detail_url": c.get("detail_url"),
+            "outline_url": c.get("outline_url"),
+
+            "description": c.get("description", ""),
+            "course_outline": c.get("course_outline", ""),
+            "instructor": c.get("instructor", ""),
+        })
+    
+    print("ai_courses =", ai_courses, flush=True)
+
     if not missing:
+        print("not missing", flush=True)
         system_prompt = """
 คุณคือ AI Sales Consultant สำหรับแนะนำหลักสูตรฝึกอบรม
 
 หน้าที่:
 - ตอบจาก matched_courses เท่านั้น
-- ถ้ามีหลายหลักสูตร ให้แนะนำตัวที่เกี่ยวข้องที่สุด 1-3 ตัว
+- ถ้ามีหลายหลักสูตร ให้เลือกตัวที่เกี่ยวข้องที่สุด
 - ห้ามบอกว่าไม่มีหลักสูตร ถ้า matched_courses มีข้อมูล
-- ห้ามเลือกหลักสูตรที่ไม่เกี่ยวข้องกับ Requirement
+- ถ้าพูดถึงชื่อหลักสูตร ต้องใช้ detail_link แทนชื่อธรรมดาเสมอ
+- ห้ามพิมพ์ชื่อหลักสูตรแบบ plain text
+- ห้ามสร้าง URL เอง
+- ถ้าพูดถึง Course Outline ให้ใช้ outline_link
+- ห้ามใช้ markdown
 - ห้ามใช้ bullet
-- ห้ามสร้าง CTA เอง
-- ห้ามพูดเรื่องลงทะเบียนหรือทีมงานติดต่อกลับ
-- ตอบแบบธรรมชาติ 2-3 ประโยค
+- ตอบแบบธรรมชาติ เหมือนเจ้าหน้าที่แนะนำหลักสูตร
+- ตอบ 2-4 ประโยค
 """.strip()
 
         user_prompt = f"""
@@ -634,20 +688,34 @@ Requirement ปัจจุบัน:
 {json.dumps(clean_requirements or {}, ensure_ascii=False)}
 
 matched_courses:
-{json.dumps(compact_courses, ensure_ascii=False)}
+{json.dumps(ai_courses, ensure_ascii=False)}
 
-ตอนนี้มีหลักสูตรที่ระบบค้นเจอแล้ว ให้แนะนำจาก matched_courses เท่านั้น
-ถ้ามีหลายตัว ให้เลือกตัวที่ตรงกับ Requirement มากที่สุด
-ห้ามใช้ bullet
-ห้ามสรุปเป็นรายการ
+คำสั่งสำคัญ:
+- ถ้าพูดชื่อหลักสูตร ต้องใช้ detail_link
+- ถ้าพูดถึงเอกสารหลักสูตร ให้ใช้ outline_link
+- ห้ามพิมพ์ชื่อหลักสูตรแบบปกติ
+- ห้ามตอบว่าไม่มีหลักสูตร ถ้ามี matched_courses
 """.strip()
+
+        reply = ""
 
         async for item in _stream_text_response(
             model="gpt-4.1-mini",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         ):
-            yield item
+            if item.get("type") == "chunk":
+                text = item.get("text", "")
+                reply += text
+                yield item
+
+            elif item.get("type") == "done":
+                reply = item.get("content") or reply
+
+        yield {
+            "type": "done",
+            "content": reply,
+        }
 
         return
 
@@ -661,6 +729,7 @@ matched_courses:
 - สะท้อนความต้องการของลูกค้าแบบสั้น ๆ
 - ถ้ามี matched_courses ให้แนะนำหลักสูตรที่เหมาะสมจาก matched_courses เท่านั้น
 - ถามข้อมูลที่ขาดอยู่ 1 ข้ออย่างเป็นธรรมชาติ
+- ห้ามสร้างลิงก์ HTML, URL, form หรือ CTA เอง
 - ห้ามใช้ bullet
 - ห้ามถามหลายคำถาม
 - ตอบ 2-3 ประโยค
@@ -674,20 +743,53 @@ Requirement ปัจจุบัน:
 {json.dumps(clean_requirements or {}, ensure_ascii=False)}
 
 matched_courses:
-{json.dumps(compact_courses, ensure_ascii=False)}
+{json.dumps(ai_courses, ensure_ascii=False)}
 
 ข้อมูลที่ต้องถามเพิ่มตอนนี้คือ:
 {label}
 
-ให้ตอบแบบธรรมชาติ โดยเลือกหลักสูตรที่เกี่ยวข้องที่สุดจาก matched_courses ถ้ามี แล้วถามต่อเรื่อง {label} เพียง 1 คำถาม
+ให้ตอบแบบธรรมชาติ และถามต่อเรื่อง {label} เพียง 1 คำถาม
+ห้ามสร้างลิงก์หรือ CTA เอง
 """.strip()
+
+    reply = ""
 
     async for item in _stream_text_response(
         model="gpt-4.1-mini",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
     ):
-        yield item
+        if item.get("type") == "chunk":
+            text = item.get("text", "")
+            reply += text
+            yield item
+
+        elif item.get("type") == "done":
+            reply = item.get("content") or reply
+
+    if best_course:
+        html_parts = []
+
+        if best_course.get("detail_link"):
+            html_parts.append(best_course["detail_link"])
+
+        if best_course.get("outline_link"):
+            html_parts.append(best_course["outline_link"])
+
+        if html_parts:
+            extra_html = "\n\n" + "\n\n".join(html_parts)
+
+            yield {
+                "type": "chunk",
+                "text": extra_html,
+            }
+
+            reply += extra_html
+
+    yield {
+        "type": "done",
+        "content": reply,
+    }
 
 # Ai assis
 async def detect_intent(
@@ -1139,6 +1241,62 @@ async def fetch_inhouse_course_detail(
     print("===== END fetch_inhouse_course_detail =====\n", flush=True)
 
     return detail
+
+async def fetch_inhouse_courses_by_ids(course_ids: list) -> list[dict]:
+    clean_ids = []
+
+    for x in course_ids or []:
+        try:
+            clean_ids.append(int(str(x).strip()))
+        except Exception:
+            continue
+
+    if not clean_ids:
+        return []
+
+    placeholders = ",".join(["?"] * len(clean_ids))
+
+    sql = f"""
+        SELECT
+            `ICourse_no`,`ICourse_category`,`ICourse_nameEN`,`ICourse_nameTH`,`ICourse_description`,`ICourse_rewrite`,`ICourse_outline`,`ICourse_instructor`
+        FROM inhouse_course
+        WHERE ICourse_no IN ({placeholders})
+    """
+
+    rows = run_query_bridge(sql, clean_ids)
+    print("rows =", rows, flush=True)
+    if not rows:
+        return []
+
+    if (
+        isinstance(rows, list)
+        and rows
+        and isinstance(rows[0], dict)
+        and "error" in rows[0]
+    ):
+        print("SQL ERROR fetch_inhouse_courses_by_ids =", rows[0], flush=True)
+        return []
+
+    row_map = {}
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        try:
+            course_id = int(row.get("ICourse_no"))
+        except Exception:
+            continue
+
+        row_map[course_id] = row
+
+    result = []
+
+    for cid in clean_ids:
+        if cid in row_map:
+            result.append(row_map[cid])
+
+    return result
 
 async def handle_irrelevant(req, state):
 

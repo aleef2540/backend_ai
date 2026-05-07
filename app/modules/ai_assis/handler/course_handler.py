@@ -16,6 +16,7 @@ from app.modules.ai_assis.service import (
     build_inhouse_topic_not_found_reply,
     classify_inhouse_need,
     fetch_inhouse_course_detail,
+    fetch_inhouse_courses_by_ids,
 )
 
 from app.modules.ai_assis.qdrant_service import (
@@ -41,7 +42,7 @@ async def resolve_inhouse_course_from_qdrant(
     user_message: str,
     state,
     limit: int = 5,
-) -> dict | None:
+    ) -> dict | None:
 
     if not state.course_context:
         state.course_context = {}
@@ -228,6 +229,94 @@ def build_public_course_url(course_name: str) -> str:
     slug = re.sub(r"-+", "-", slug)
 
     return f"https://www.entraining.net/public-course/{slug}"
+
+def build_inhouse_course_url_from_row(row: dict) -> str:
+    course_rewrite = (row.get("course_rewrite") or "").strip()
+
+    if not course_rewrite:
+        return ""
+
+    return f"https://www.entraining.net/course/{course_rewrite}/"
+
+def build_course_actions(row: dict) -> dict:
+
+    course_id = row.get("ICourse_no")
+
+    course_name_en = (row.get("ICourse_nameEN") or "").strip()
+    course_name_th = (row.get("ICourse_nameTH") or "").strip()
+
+    if course_name_en and course_name_th:
+        course_name = f"{course_name_en} | {course_name_th}"
+    else:
+        course_name = course_name_en or course_name_th
+
+    course_rewrite = (row.get("ICourse_rewrite") or "").strip()
+
+    detail_url = ""
+    if course_rewrite:
+        detail_url = f"https://www.entraining.net/course/{course_rewrite}/"
+
+    outline_url = ""
+    if course_id:
+        outline_url = f"https://www.entraining.net/course/download?id={course_id}"
+
+    detail_link = (
+        f'<a href="{detail_url}" '
+        f'target="_blank" '
+        f'style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">'
+        f'{course_name}'
+        f'</a>'
+    ) if detail_url else course_name
+
+    outline_link = (
+        f'<a href="{outline_url}" '
+        f'target="_blank" '
+        f'style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">'
+        f'Course Outline'
+        f'</a>'
+    ) if outline_url else ""
+
+    quotation_payload = {
+        "action_url": "https://www.entraining.net/course/program",
+        "method": "post",
+        "action": "check_formquotation",
+        "course_id": course_id,
+        "button_label": "ขอใบเสนอราคา (Quotation)",
+        "sub_label": "ทีมงานติดต่อกลับภายใน 24 ชั่วโมง",
+    } if course_id else None
+
+    return {
+        "course_id": course_id,
+        "course_name": course_name,
+        "detail_url": detail_url,
+        "outline_url": outline_url,
+        "detail_link": detail_link,
+        "outline_link": outline_link,
+        "quotation_payload": quotation_payload,
+    }
+
+def compact_inhouse_sql_course(row: dict) -> dict:
+
+    actions = build_course_actions(row)
+
+    return {
+        "course_id": actions["course_id"],
+        "course_name": actions["course_name"],
+
+        # HTML
+        "detail_link": actions["detail_link"],
+        "outline_link": actions["outline_link"],
+        "quotation_payload": actions["quotation_payload"],
+
+        # raw url
+        "detail_url": actions["detail_url"],
+        "outline_url": actions["outline_url"],
+
+        # content
+        "description": row.get("ICourse_description") or "",
+        "course_outline": row.get("ICourse_outline") or "",
+        "instructor": row.get("ICourse_instructor") or "",
+    }
 
 async def handle_inhouse_course_detail(req, state):
 
@@ -658,9 +747,11 @@ async def handle_inhouse_course_search(req, state):
         return
 
     # 2) AI บอกว่าควร search แล้ว
-    search_query = (need.get("search_query") or "").strip()
+    # search_query = (need.get("search_query") or "").strip()
+    search_query = await build_search_query(state.course_context)
 
     if not search_query:
+        print("build_search_query", flush=True)
         search_query = await build_search_query(state.course_context)
 
     state.course_context["search_query"] = search_query
@@ -672,6 +763,7 @@ async def handle_inhouse_course_search(req, state):
         limit=5
     )
 
+    # print("topic_check_courses =", topic_check_courses, flush=True)
     # 3) ไม่พบหลักสูตร ให้ AI ถาม refine
     if not topic_check_courses:
 
@@ -717,48 +809,48 @@ async def handle_inhouse_course_search(req, state):
 
         return
 
-    matched_courses = (
-        topic_check_courses
-        if isinstance(topic_check_courses, list)
-        else [topic_check_courses]
-    )
+    course_ids = [
+        item.get("course_id")
+        for item in topic_check_courses
+        if item.get("course_id")
+    ]
 
-    matched_courses = [c for c in matched_courses if c]
-    matched_courses = matched_courses[:2]
-    print("matched_course =", matched_courses, flush=True)
+    course_ids = course_ids[:1]
+
+    print("course_ids =", course_ids, flush=True)
+
+    sql_courses = await fetch_inhouse_courses_by_ids(course_ids)
+
+    print("sql_courses =", sql_courses, flush=True)
+    if not sql_courses:
+        # topic_not_found หรือ discovery
+        ...
+
+    matched_courses = [
+        compact_inhouse_sql_course(row)
+        for row in sql_courses
+    ]
+
+    matched_courses = [
+        c for c in matched_courses
+        if c.get("course_name")
+    ]
+
+    print("matched_courses =", matched_courses, flush=True)
+
     state.course_context["matched_course"] = matched_courses
     state.course_context["course_stage"] = "matched"
+    state.course_context["last_inhouse_course"] = matched_courses[0]
+    state.course_context["last_inhouse_course_id"] = matched_courses[0].get("course_id")
+    state.course_context["last_inhouse_course_name"] = matched_courses[0].get("course_name")
+
     state.recommended_courses = matched_courses
     state.recommended_course_cta = []
-
-    course_cta = []
-
-    for course in matched_courses:
-        payload = get_course_payload(course)
-
-        course_no = (
-            payload.get("course_no")
-            or payload.get("OCourse_no")
-            or payload.get("id")
-        )
-
-        course_name = (
-            payload.get("course_name")
-            or payload.get("vdo_name")
-            or payload.get("Course_name")
-            or payload.get("title")
-        )
-
-        if course_no and course_name:
-            course_cta.append({
-                "course_no": course_no,
-                "course_name": course_name,
-            })
-
-    state.recommended_course_cta = course_cta
+    state.matched_course = matched_courses[0].get("course_name")
+    state.matched_course_id = matched_courses[0].get("course_id")
 
     reply = ""
-
+    print("build_next_question_topic", flush=True)
     async for item in build_next_question_topic(
         requirements=state.course_context,
         missing=[],
@@ -777,8 +869,8 @@ async def handle_inhouse_course_search(req, state):
             reply = item.get("content") or reply
 
     state.last_answer = reply
-    state.matched_course = matched_courses
-    state.matched_course_id = course_id
+    # state.matched_course = matched_courses
+    # state.matched_course_id = course_id
     state.last_step = "inhouse_course_matched"
     state.mode = "course_post_recommend"
 
