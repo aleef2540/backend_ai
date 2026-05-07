@@ -28,6 +28,14 @@ MODEL_PRICING = {
         "input_per_1m": Decimal("0.13"),
         "output_per_1m": Decimal("0.00"),
     },
+    "gpt-4o-mini": {
+        "input_per_1m": Decimal("0.15"),
+        "output_per_1m": Decimal("0.60"),
+    },
+        "gpt-5-mini": {
+        "input_per_1m": Decimal("0.25"),
+        "output_per_1m": Decimal("2.00"),
+    },
 }
 
 def q4(value: Decimal) -> Decimal:
@@ -157,7 +165,8 @@ async def call_openai_chat_full(
         completion_tokens=completion_tokens,
     )
     
-    # 🔥 print แค่ cost
+    # 🔥 print แค่ 
+    print(f"[MODEL] model={model}")
     print(f"[TOKEN] total={cost['total_tokens']}")
     print(f"         prompt={cost['prompt_tokens']} | completion={cost['completion_tokens']}")
     print(f"[COST]  ${cost['total_cost_usd']} (~{cost['total_cost_thb']} บาท)")
@@ -323,6 +332,7 @@ async def call_openai_chat_stream_full(
         completion_tokens=completion_tokens,
     )
 
+    print(f"[MODEL] model={model}")
     print(f"[TOKEN] total={cost['total_tokens']}")
     print(f"         prompt={cost['prompt_tokens']} | completion={cost['completion_tokens']}")
     print(f"[COST]  ${cost['total_cost_usd']} (~{cost['total_cost_thb']} บาท)")

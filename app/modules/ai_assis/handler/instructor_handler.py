@@ -9,8 +9,108 @@ from app.modules.ai_assis.service import (
 
 from app.modules.ai_assis.instructor_service import (
     fetch_instructor_context,
+    fetch_instructor_detail,
 )
 
+from app.shared.ai.openai_client import call_openai_chat_full
+
+def normalize_text(text: str) -> str:
+    text = (text or "").lower().strip()
+    text = re.sub(r"\s+", "", text)
+    return text
+
+
+async def match_instructor_by_ai(
+    user_message: str,
+    instructors: list[dict],
+    conversation_history: list | None = None,
+    state=None
+) -> dict | None:
+
+    conversation_context = build_conversation_context(conversation_history)
+
+    compact_instructors = []
+
+    for i, instructor in enumerate(instructors):
+        compact_instructors.append({
+            "index": i,
+            "instructor_name": instructor.get("instructor_name", ""),
+            "style": instructor.get("style", ""),
+            "designation": instructor.get("designation", ""),
+        })
+
+    last_instructor = {}
+
+    if state is not None:
+        instructor_context = getattr(state, "instructor_context", {}) or {}
+        last_instructor = instructor_context.get("last_instructor") or {}
+
+    system_prompt = """
+คุณคือ Instructor Matcher
+
+หน้าที่:
+- เลือกวิทยากรที่ผู้ใช้หมายถึงจาก instructor_candidates เท่านั้น
+- ถ้าผู้ใช้พูดว่า "คนนี้", "ท่านนี้", "อาจารย์คนนี้", "วิทยากรคนนี้" ให้ดูบทสนทนาก่อนหน้าและ last_instructor
+- ถ้าผู้ใช้พูดถึงชื่อบางส่วน เช่น ชื่อจริง นามสกุล หรือคำนำหน้า ให้เลือกคนที่ตรงที่สุด
+- ถ้าผู้ใช้พูดถึงแนวทาง เช่น coaching, group coaching, hardskill, workshop ให้เทียบกับ style และ designation
+- ถ้าไม่มั่นใจ ให้ตอบ matched_index = null
+- ห้ามแต่งชื่อวิทยากร
+- ตอบ JSON เท่านั้น
+
+รูปแบบ JSON:
+{
+  "matched_index": 0,
+  "confidence": 0.0,
+  "reason": ""
+}
+""".strip()
+
+    user_prompt = f"""
+ข้อความล่าสุดของผู้ใช้:
+{user_message}
+
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+last_instructor:
+{json.dumps(last_instructor, ensure_ascii=False)}
+
+instructor_candidates:
+{json.dumps(compact_instructors, ensure_ascii=False)}
+
+เลือกวิทยากรที่ตรงที่สุด
+""".strip()
+
+    result = await call_openai_chat_full(
+        model="gpt-4o-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.1,
+    )
+
+    text = (result.get("content") or "").strip()
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    try:
+        data = json.loads(text)
+        matched_index = data.get("matched_index", None)
+        confidence = float(data.get("confidence", 0))
+
+        if matched_index is None:
+            return None
+
+        matched_index = int(matched_index)
+
+        if confidence < 0.55:
+            return None
+
+        if matched_index < 0 or matched_index >= len(instructors):
+            return None
+
+        return instructors[matched_index]
+
+    except Exception:
+        return None
 
 def build_instructor_url(instructor_name: str) -> str:
     instructor_name = (instructor_name or "").strip()
@@ -40,8 +140,7 @@ def build_instructor_url(instructor_name: str) -> str:
 
     return "https://www.entraining.net/expert/" + slug + "/"
 
-
-async def handle_instructor_search(req, state):
+async def handle_instructor_list(req, state):
 
     user_message = (req.user_message or "").strip()
     conversation_context = build_conversation_context(state.conversation_history)
@@ -88,16 +187,11 @@ async def handle_instructor_search(req, state):
 - ตอบคำถามเกี่ยวกับวิทยากร ผู้สอน อาจารย์ trainer หรือ speaker จาก instructor_context เท่านั้น
 - สรุปและแนะนำวิทยากรที่เกี่ยวข้องกับสิ่งที่ผู้ใช้ถาม
 - ถ้าพูดถึงชื่อวิทยากร ให้ทำเป็นลิงก์ HTML จาก instructor_url ที่ให้มา
-- รูปแบบลิงก์ต้องเป็น <a href="URL"
-target="_blank"
-style="
-color:#004AAD;
-font-weight:700;
-text-decoration:none;
-border-bottom:1px solid #287CED;
-">
-ชื่อวิทยากร
-</a>
+- ถ้าพูดถึงชื่อวิทยากร ต้องสร้าง HTML link ให้ครบทั้ง tag เท่านั้น
+- รูปแบบต้องเป็น:
+<a href="URL" target="_blank" style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">ชื่อวิทยากร</a>
+- ห้ามตัด <a href=
+- ห้ามตอบเฉพาะ style หรือ target
 
 - ห้ามสร้าง URL เอง ถ้าไม่มี instructor_url
 - ห้ามแต่งชื่อวิทยากร ประวัติ ตำแหน่ง หรือความเชี่ยวชาญที่ไม่มีใน context
@@ -144,7 +238,7 @@ instructor_context:
     reply = ""
 
     async for item in _stream_text_response(
-        model="gpt-4.1-mini",
+        model="gpt-4o-mini",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.4,
@@ -181,5 +275,176 @@ instructor_context:
         "state": state,
         "source": "entraining_expert_page",
     }
+
+    return
+
+async def handle_instructor_detail(req, state):
+    user_message = (req.user_message or "").strip()
+    conversation_context = build_conversation_context(state.conversation_history)
+
+    if not state.instructor_context:
+        state.instructor_context = {}
+
+    instructors = await fetch_instructor_context()
+
+    instructor_context_with_links = []
+
+    for item in instructors:
+        if isinstance(item, dict):
+            instructor_context_with_links.append(item)
+
+    matched_instructor = await match_instructor_by_ai(
+    user_message=user_message,
+    instructors=instructor_context_with_links,
+    conversation_history=state.conversation_history,
+    state=state
+    )
+
+    # if not matched_instructor:
+    #     matched_instructor = find_instructor_from_message(
+    #         user_message=user_message,
+    #         instructors=instructor_context_with_links,
+    #         state=state
+    #     )
+
+    if not matched_instructor:
+        reply = "อยากทราบรายละเอียดของวิทยากรท่านไหนครับ รบกวนพิมพ์ชื่อวิทยากร หรือบอกแนวทาง/หลักสูตรที่สนใจได้เลยครับ"
+
+        state.mode = "instructor_detail"
+        state.last_answer = reply
+        state.last_step = "instructor_detail_need_name"
+
+        yield {
+            "type": "done",
+            "reply": reply,
+            "status": "collecting_info",
+            "reason": "instructor_detail_need_name",
+            "state": state,
+            "source": "entraining_instructor_detail",
+        }
+
+        return
+
+    instructor_url = (matched_instructor.get("instructor_url") or "").strip()
+
+    if not instructor_url:
+        reply = "ยังไม่พบลิงก์รายละเอียดของวิทยากรท่านนี้ครับ"
+
+        yield {
+            "type": "done",
+            "reply": reply,
+            "status": "not_found",
+            "reason": "instructor_url_not_found",
+            "state": state,
+            "source": "entraining_instructor_detail",
+        }
+
+        return
+
+    instructor_detail_context = await fetch_instructor_detail(instructor_url)
+
+    merged_instructor_detail = {
+        **matched_instructor,
+        **instructor_detail_context,
+    }
+
+    state.instructor_context["instructor_action"] = "detail"
+    state.instructor_context["last_instructor"] = matched_instructor
+    state.instructor_context["last_instructor_detail"] = merged_instructor_detail
+
+    system_prompt = """
+คุณคือ AI Assistant ของเว็บไซต์ En-Training
+
+หน้าที่:
+- ตอบรายละเอียดวิทยากรจาก instructor_detail เท่านั้น
+- ใช้ข้อมูลชื่อวิทยากร style designation image_url instructor_url และ profile_detail ประกอบการตอบ
+- ห้ามแต่งประวัติ ความเชี่ยวชาญ ผลงาน หรือข้อมูลที่ไม่มีใน context
+- ถ้าพูดถึงชื่อวิทยากร ให้ทำเป็นลิงก์ HTML จาก instructor_url ที่ให้มา
+- รูปแบบลิงก์ต้องเป็น <a href="URL" target="_blank" style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">ชื่อวิทยากร</a>
+- ห้ามใช้ markdown
+- ตอบแบบธรรมชาติ เหมือนเจ้าหน้าที่ช่วยแนะนำ
+- ตอบ 3-6 ประโยค
+""".strip()
+
+    user_prompt = f"""
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+instructor_detail:
+{json.dumps(merged_instructor_detail, ensure_ascii=False)}
+
+ข้อความล่าสุดของผู้ใช้:
+{user_message}
+
+ช่วยตอบรายละเอียดวิทยากรจาก instructor_detail เท่านั้น
+""".strip()
+
+    reply = ""
+
+    async for item in _stream_text_response(
+        model="gpt-4o-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.35,
+    ):
+        if item.get("type") == "chunk":
+            text = item.get("text", "")
+            reply += text
+
+            yield {
+                "type": "chunk",
+                "text": text
+            }
+
+        elif item.get("type") == "done":
+            reply = item.get("content") or reply
+
+    state.mode = "instructor_detail"
+    state.last_answer = reply
+    state.last_step = "instructor_detail"
+
+    state.conversation_history.append({
+        "role": "assistant",
+        "content": reply
+    })
+
+    if len(state.conversation_history) > 10:
+        state.conversation_history = state.conversation_history[-10:]
+
+    yield {
+        "type": "done",
+        "reply": reply,
+        "status": "answered",
+        "reason": "instructor_detail",
+        "state": state,
+        "source": "entraining_instructor_detail",
+    }
+
+    return
+
+async def handle_instructor_search(req, state):
+
+    instructor_context = getattr(state, "instructor_context", {}) or {}
+
+    instructor_action = (
+        instructor_context.get("instructor_action")
+        or "overview"
+    )
+
+    if instructor_action == "detail":
+
+        async for item in handle_instructor_detail(
+            req=req,
+            state=state
+        ):
+            yield item
+
+        return
+
+    async for item in handle_instructor_list(
+        req=req,
+        state=state
+    ):
+        yield item
 
     return

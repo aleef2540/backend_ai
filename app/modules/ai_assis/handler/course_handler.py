@@ -25,33 +25,107 @@ from app.modules.ai_assis.public_course_service import (
     fetch_public_course_detail,
 )
 
+from app.shared.ai.openai_client import (
+    call_openai_chat_full,
+)
+
 def normalize_text(text: str) -> str:
     text = (text or "").lower().strip()
     text = re.sub(r"\s+", "", text)
     return text
 
 
-def find_public_course_from_message(user_message: str, courses: list[dict], state=None):
-    message_norm = normalize_text(user_message)
+async def match_public_course_by_ai(
+    user_message: str,
+    courses: list[dict],
+    conversation_history: list | None = None,
+    state=None
+) -> dict | None:
 
-    for course in courses:
-        course_name = course.get("course_name", "")
-        course_name_en = course.get("course_name_en", "")
+    conversation_context = build_conversation_context(conversation_history)
 
-        if course_name and normalize_text(course_name) in message_norm:
-            return course
+    compact_courses = []
 
-        if course_name_en and normalize_text(course_name_en) in message_norm:
-            return course
+    for i, course in enumerate(courses):
+        compact_courses.append({
+            "index": i,
+            "course_name": course.get("course_name", ""),
+            "course_name_en": course.get("course_name_en", ""),
+            "course_date": course.get("course_date", ""),
+            "month": course.get("month", ""),
+            "price": course.get("price", ""),
+            "badge": course.get("badge", ""),
+        })
 
+    system_prompt = """
+คุณคือ Course Matcher
+
+หน้าที่:
+- เลือกหลักสูตร Public Training ที่ผู้ใช้หมายถึงจาก course_candidates เท่านั้น
+- ถ้าผู้ใช้พูดว่า "คอร์สนี้", "อันนี้", "หลักสูตรนี้" ให้ดูบทสนทนาก่อนหน้าและ last_public_course
+- ถ้าไม่มั่นใจ ให้ตอบ matched_index = null
+- ห้ามแต่งชื่อหลักสูตร
+- ตอบ JSON เท่านั้น
+
+รูปแบบ JSON:
+{
+  "matched_index": 0,
+  "confidence": 0.0,
+  "reason": ""
+}
+""".strip()
+
+    last_public_course = {}
     if state is not None:
         course_context = getattr(state, "course_context", {}) or {}
+        last_public_course = course_context.get("last_public_course") or {}
 
-        last_public_course = course_context.get("last_public_course")
-        if isinstance(last_public_course, dict):
-            return last_public_course
+    user_prompt = f"""
+ข้อความล่าสุดของผู้ใช้:
+{user_message}
 
-    return None
+บทสนทนาก่อนหน้า:
+{conversation_context}
+
+last_public_course:
+{json.dumps(last_public_course, ensure_ascii=False)}
+
+course_candidates:
+{json.dumps(compact_courses, ensure_ascii=False)}
+
+เลือก course ที่ตรงที่สุด
+""".strip()
+
+    result = await call_openai_chat_full(
+        model="gpt-4o-mini",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.1,
+    )
+
+    text = (result.get("content") or "").strip()
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    try:
+        data = json.loads(text)
+        matched_index = data.get("matched_index", None)
+        confidence = float(data.get("confidence", 0))
+
+        if matched_index is None:
+            return None
+
+        matched_index = int(matched_index)
+
+        if confidence < 0.55:
+            return None
+
+        if matched_index < 0 or matched_index >= len(courses):
+            return None
+
+        return courses[matched_index]
+
+    except Exception:
+        return None
 
 def get_course_payload(course):
     if isinstance(course, dict):
@@ -59,7 +133,6 @@ def get_course_payload(course):
         return payload if isinstance(payload, dict) else {}
 
     return {}
-
 
 def get_course_id(course):
     payload = get_course_payload(course)
@@ -69,7 +142,6 @@ def get_course_id(course):
         or payload.get("OCourse_no")
         or payload.get("id")
     )
-
 
 def build_public_course_url(course_name: str) -> str:
     course_name = (course_name or "").strip()
@@ -104,7 +176,7 @@ async def handle_public_course_detail(req, state):
         public_courses = await fetch_public_course_context()
         state.course_context["public_context"] = public_courses
 
-    matched_course = find_public_course_from_message(
+    matched_course = await match_public_course_by_ai(
         user_message=user_message,
         courses=public_courses,
         state=state
@@ -212,7 +284,7 @@ public_course_detail:
     reply = ""
 
     async for item in _stream_text_response(
-        model="gpt-4.1-nano",
+        model="gpt-4o-mini",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.3,
@@ -775,6 +847,7 @@ async def handle_public_course_search(req, state):
 
     if public_course_context_with_links:
         state.course_context["last_public_course"] = public_course_context_with_links[0]
+    
 
     system_prompt = """
 คุณคือ AI Assistant ของเว็บไซต์ En-Training
@@ -831,7 +904,7 @@ public_course_context:
     reply = ""
 
     async for item in _stream_text_response(
-        model="gpt-4.1-nano",
+        model="gpt-4o-mini",
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.4,

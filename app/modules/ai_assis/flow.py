@@ -66,6 +66,9 @@ async def process_ai_assistant_stream(req, state):
 
         if not state.course_context:
             state.course_context = {}
+        
+        if not state.instructor_context:
+            state.instructor_context = {}
 
         state.current_intent = intent_result.get(
             "intent",
@@ -79,6 +82,11 @@ async def process_ai_assistant_stream(req, state):
 
         state.course_context["course_action"] = intent_result.get(
             "course_action",
+            "unknown"
+        )
+
+        state.instructor_context["instructor_action"] = intent_result.get(
+            "instructor_action",
             "unknown"
         )
 

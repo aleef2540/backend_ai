@@ -39,7 +39,7 @@ async def chat_ai_sale_stream(req: AISaleRequest):
 
         try:
             async for item in process_ai_assistant_stream(req, state):
-                print("STREAM ITEM =", item.get("type"), flush=True)
+                # print("STREAM ITEM =", item.get("type"), flush=True)
 
                 item_type = item.get("type")
 
@@ -61,7 +61,7 @@ async def chat_ai_sale_stream(req: AISaleRequest):
                     final_source = item.get("source", final_source)
 
                     print("✅ STREAM DONE", flush=True)
-                    print("FINAL STATE =", final_state.model_dump(), flush=True)
+                    # print("FINAL STATE =", final_state.model_dump(), flush=True)
 
                     ai_sale_state_store.set_state(
                         req.chat_id,

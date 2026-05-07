@@ -696,10 +696,12 @@ course_type:
 course_action:
 - overview = ผู้ใช้ถามภาพรวม รายชื่อหลักสูตร ตารางอบรม มีคอร์สอะไรบ้าง รอบอบรมเดือนนี้ เดือนหน้า
 - detail = ผู้ใช้ถามรายละเอียดหลักสูตร เนื้อหา เรียนอะไร หัวข้ออบรม วัตถุประสงค์ เหมาะกับใคร ได้อะไร
-- register = ผู้ใช้ต้องการสมัคร ลงทะเบียน จองที่นั่ง
-- brochure = ผู้ใช้ต้องการโบรชัวร์ เอกสาร รายละเอียด PDF
-- price = ผู้ใช้ถามราคา ค่าอบรม
 - unknown = ยังไม่ชัดเจน
+
+instructor_action:
+- overview = ถามรายชื่อ/แนะนำวิทยากร
+- detail = ถามประวัติ รายละเอียด ความเชี่ยวชาญ ผลงาน ของวิทยากรคนใดคนหนึ่ง
+- unknown = ยังไม่ชัด
 
 ตัวอย่าง:
 - "public มีหลักสูตรอะไรบ้าง" 
@@ -756,6 +758,7 @@ course_action:
   "intent": "course_search",
   "course_type": "unknown",
   "course_action": "unknown",
+  "instructor_action": "unknown",
   "confidence": 0.0,
   "reason": "",
   "topic": "",
@@ -809,11 +812,14 @@ previous_course_type:
     allowed_course_actions = [
     "overview",
     "detail",
-    "register",
-    "brochure",
-    "price",
     "unknown",
     ]
+
+    allowed_instructor_actions = [
+    "overview",
+    "detail",
+    "unknown",
+]
     
     try:
         data = json.loads(text)
@@ -839,10 +845,19 @@ previous_course_type:
         if intent not in ["course_search", "quotation"]:
             course_action = "unknown"
 
+        instructor_action = data.get("instructor_action", "unknown")
+
+        if instructor_action not in allowed_instructor_actions:
+            instructor_action = "unknown"
+
+        if intent != "instructor_search":
+            instructor_action = "unknown"
+
         return {
             "intent": intent,
             "course_type": course_type,
             "course_action": course_action,
+            "instructor_action": instructor_action,
             "confidence": float(data.get("confidence", 0.5)),
             "reason": data.get("reason", ""),
             "topic": data.get("topic", ""),
@@ -859,6 +874,7 @@ previous_course_type:
             "intent": "general_qa",
             "course_type": "unknown",
             "course_action": "unknown",
+            "instructor_action": "unknown",
             "confidence": 0.3,
             "reason": "parse_failed",
             "topic": "",
