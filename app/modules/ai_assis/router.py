@@ -69,17 +69,17 @@ async def chat_ai_sale_stream(req: AISaleRequest):
                     )
 
                     # ✅ บันทึก log ลง DB ผ่าน PHP bridge
-                    # log_result = insert_ai_sale_chat_log_bridge(
-                    #     chat_id=req.chat_id,
-                    #     user_message=req.user_message,
-                    #     ai_reply=final_reply,
-                    #     state=final_state,
-                    #     status=item.get("status", ""),
-                    #     reason=item.get("reason", ""),
-                    #     source=final_source,
-                    # )
+                    log_result = insert_ai_sale_chat_log_bridge(
+                        chat_id=req.chat_id,
+                        user_message=req.user_message,
+                        ai_reply=final_reply,
+                        state=final_state,
+                        status=item.get("status", ""),
+                        reason=item.get("reason", ""),
+                        source=final_source,
+                    )
 
-                    # print("✅ AI SALE LOG RESULT =", log_result, flush=True)
+                    print("✅ AI SALE LOG RESULT =", log_result, flush=True)
 
                     courses = item.get("courses", [])
                     payload = json.dumps({
