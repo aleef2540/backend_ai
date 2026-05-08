@@ -511,7 +511,7 @@ async def ai_generate_course_confirmation_reply(user_message, state):
     best_course = course_candidates[0] if course_candidates else {}
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - แจ้งผู้ใช้อย่างเป็นธรรมชาติว่าระบบพบหลักสูตรที่ใกล้เคียง
@@ -566,7 +566,7 @@ async def ai_generate_quotation_reply(user_message, state, analysis):
     conversation_context = build_conversation_context(state.conversation_history)
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ช่วยผู้ใช้ขอใบเสนอราคาอบรม

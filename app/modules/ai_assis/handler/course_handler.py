@@ -441,7 +441,7 @@ async def handle_inhouse_course_detail(req, state):
     state.course_context["last_inhouse_course_detail"] = merged_course_detail
 
     system_prompt = """
-คุณคือ AI Sales Consultant ของเว็บไซต์ En-Training
+คุณคือ AI Sales Consultant ของเว็บไซต์ En-Training เพศชาย
 
 หน้าที่:
 - ตอบรายละเอียดหลักสูตร In-house Training จาก inhouse_course_detail เท่านั้น
@@ -591,7 +591,7 @@ async def handle_public_course_detail(req, state):
     state.course_context["last_public_course_detail"] = merged_course_detail
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์ En-Training
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย 
 
 หน้าที่:
 - ตอบรายละเอียดหลักสูตร Public Training จาก public_course_detail เท่านั้น
@@ -955,7 +955,7 @@ async def handle_public_course_search(req, state):
     
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์ En-Training
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ตอบคำถามเกี่ยวกับหลักสูตรแบบ Public Training จาก public_course_context เท่านั้น
@@ -1105,7 +1105,7 @@ async def ask_course_type(req, state):
     course_context = getattr(state, "course_context", {}) or {}
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ช่วยผู้ใช้ที่สนใจหลักสูตร แต่ยังไม่ชัดว่าอยากดูแบบ Public Training หรือ In-house Training

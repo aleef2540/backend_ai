@@ -181,7 +181,7 @@ async def handle_instructor_list(req, state):
     state.instructor_context["matched_count"] = len(instructor_context_with_links)
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์ En-Training
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ตอบคำถามเกี่ยวกับวิทยากร ผู้สอน อาจารย์ trainer หรือ speaker จาก instructor_context เท่านั้น
@@ -353,7 +353,7 @@ async def handle_instructor_detail(req, state):
     state.instructor_context["last_instructor_detail"] = merged_instructor_detail
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์ En-Training
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ตอบรายละเอียดวิทยากรจาก instructor_detail เท่านั้น

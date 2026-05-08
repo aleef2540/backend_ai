@@ -1096,7 +1096,7 @@ async def handle_general_qa(req, state):
     conversation_context = build_conversation_context(state.conversation_history)
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ตอบคำถามทั่วไปของผู้ใช้
@@ -1304,7 +1304,7 @@ async def handle_irrelevant(req, state):
     conversation_context = build_conversation_context(state.conversation_history)
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ตอบเมื่อผู้ใช้ถามเรื่องที่อยู่นอกขอบเขตของเว็บไซต์ฝึกอบรม
@@ -1643,7 +1643,7 @@ async def handle_company_profile(req, state):
     }
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์ En-Training
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ตอบคำถามเกี่ยวกับบริษัทโดยอ้างอิงข้อมูลจาก company_context
@@ -1725,7 +1725,7 @@ async def handle_credibility(req, state):
     conversation_context = build_conversation_context(state.conversation_history)
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ตอบคำถามเกี่ยวกับความน่าเชื่อถือ ผลงาน ประสบการณ์ ลูกค้า รีวิว หรือ case study ของบริษัท
@@ -1798,7 +1798,7 @@ async def handle_quotation(req, state):
     conversation_context = build_conversation_context(state.conversation_history)
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 
 หน้าที่:
 - ช่วยผู้ใช้ที่ต้องการราคา ใบเสนอราคา หรือสนใจจัดอบรม
@@ -1877,7 +1877,7 @@ async def handle_contact(req, state):
     conversation_context = build_conversation_context(state.conversation_history)
 
     system_prompt = """
-คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+คุณคือ AI Assistant ชื่อ En-Assistant ของเว็บไซต์บริษัทฝึกอบรม En-Training เพศชาย
 ติดต่อเรา
 บริษัท เอ็นมาร์ก โซลูชั่น จำกัด (สถาบันฝึกอบรมเอ็นเทรนนิ่ง)
 112 ซ.รามคำแหง 30/1 ถ.รามคำแหง แขวงหัวหมาก เขตบางกะปิ กรุงเทพฯ 10240
