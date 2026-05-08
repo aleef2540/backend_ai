@@ -1,235 +1,78 @@
-from app.modules.ai_coach.schema import ChatRequest_aicoach, ChatResponse_aicoach, ChatState
-
+from app.modules.ai_coach.schema import ChatRequest_aicoach, ChatState, StepAnswer
+from app.modules.ai_coach.constants import PHASES
 from app.modules.ai_coach.service import (
-   generate_opening_ai_coach_question,
-   evaluate_user_answer,
-   generate_retry_same_step_question,
-   generate_probe_same_step_question,
-   generate_next_step_question,
-   generate_opening_ai_coach_question_stream,
-   evaluate_answer,
-   ask,
-   ask_followup,
-   ask_phase_transition,
-   generate_tgrow_final_summary_stream,
-   generate_next_step_question_stream,
-   generate_retry_same_step_question_stream,
-   generate_probe_same_step_question_stream,
-   
-   
+    evaluate_answer,
+    analyze_coaching_context,
+    decide_dialogue_policy,
+    update_coaching_memory,
+    step_key,
+    ask_opening,
+    ask_scope_redirect,
+    ask_reframe_scope,
+    ask_clarify_same_step,
+    ask_deeper_coaching_question,
+    ask_next_question,
+    ask_phase_transition,
+    ask_final_summary,
 )
-from app.modules.ai_coach.constants import FIXED_QUESTIONS, TOPIC, PHASE1_RULES, PHASES
 
 
-async def process_chat_aicoach(req: ChatRequest_aicoach, state: ChatState) -> ChatResponse_aicoach:
-    user_message = req.user_message.strip()
+def get_current_rule(state: ChatState) -> dict:
+    phase_data = PHASES[state.phase]
+    return phase_data["rules"][state.step]
 
-    if not user_message:
-        return ChatResponse_aicoach(
-            reply="กรุณาพิมพ์สิ่งที่ต้องการพัฒนา / ปัญหาที่อยากแก้",
-            state=state,
-            source="empty_message",
-        )
 
-    if state.step == 0:
-        # 1) ดึง fixed question
-        fixed_q = state.fixed_question
+def get_next_position(state: ChatState) -> tuple[int, int] | None:
+    phase_data = PHASES[state.phase]
+    rules = phase_data["rules"]
 
-        # 2) ให้ AI rewrite ให้เป็นโค้ช
-        q1 = await generate_opening_ai_coach_question(
-            fixed_question=fixed_q
-        )
+    if state.step < max(rules.keys()):
+        return state.phase, state.step + 1
 
-        # 3) update state
-        new_state = ChatState(
-            step=1,
-            fixed_question=fixed_q,
-            last_question=q1,
-            answers_by_step=state.answers_by_step,
-            history=state.history,
-        )
+    next_phase = state.phase + 1
+    if next_phase in PHASES:
+        return next_phase, 1
 
-        # เก็บ history: AI ถามเปิดข้อแรก
-        new_state.history.append({
-            "step": 1,
-            "event": "ai_question",
-            "fixed_question": fixed_q,
-            "asked_question": q1,
-        })
+    return None
 
-        reply = q1
 
-    else:
-        fixed_q = state.fixed_question
-        current_step = state.step
+def save_current_answer(state: ChatState, rule: dict, user_message: str, eval_result: dict):
+    key = rule["key"]
+    state.answers[key] = eval_result.get("extracted", {}).get(key, user_message)
 
-        # ตั้งต้นไว้ก่อนกัน UnboundLocalError
-        new_state = state
-
-        # เก็บ history: user answer
-        state.history.append({
-            "step": current_step,
-            "event": "user_answer",
-            "fixed_question": fixed_q,
-            "asked_question": state.last_question,
-            "user_answer": user_message,
-        })
-
-        check = await evaluate_user_answer(
-            question=fixed_q,
-            user_answer=user_message,
-        )
-
-        status = check.get("status", "off_topic")
-        reason = check.get("reason", "")
-        confidence = check.get("confidence", 0.0)
-
-        # เก็บ history: evaluation result
-        state.history.append({
-            "step": current_step,
-            "event": "evaluation",
-            "fixed_question": fixed_q,
-            "asked_question": state.last_question,
-            "user_answer": user_message,
-            "status": status,
-            "reason": reason,
-            "confidence": confidence,
-            "raw": check.get("raw", ""),
-        })
-
-        # สร้างที่เก็บของข้อปัจจุบันถ้ายังไม่มี
-        if current_step not in state.answers_by_step:
-            state.answers_by_step[current_step] = {
-                "fixed_question": fixed_q,
-                "asked_question": state.last_question,
-                "user_answer": "",
-                "status": "",
-                "reason": "",
-                "confidence": 0.0,
-                "is_completed": False,
-            }
-
-        # update ข้อมูลของข้อปัจจุบัน
-        state.answers_by_step[current_step]["fixed_question"] = fixed_q
-        state.answers_by_step[current_step]["asked_question"] = state.last_question
-        state.answers_by_step[current_step]["user_answer"] = user_message
-        state.answers_by_step[current_step]["status"] = status
-        state.answers_by_step[current_step]["reason"] = reason
-        state.answers_by_step[current_step]["confidence"] = confidence
-
-        new_state = state
-
-        if status in {"off_topic", "too_short"}:
-            reply = await generate_retry_same_step_question(
-                fixed_question=fixed_q,
-                user_answer=user_message,
-                status=status,
-            )
-            new_state.last_question = reply
-
-            # เก็บ history: AI retry same step
-            state.history.append({
-                "step": current_step,
-                "event": "ai_retry_question",
-                "fixed_question": fixed_q,
-                "asked_question": reply,
-                "based_on_status": status,
-            })
-
-        elif status in {"partial", "reflecting", "clear_but_needs_guidance"}:
-            # ถ้าข้อนี้เริ่มมีคำตอบที่ใช้ได้แล้ว ค่อย mark completed
-            if status == "clear_but_needs_guidance":
-                state.answers_by_step[current_step]["is_completed"] = True
-
-            reply = await generate_probe_same_step_question(
-                fixed_question=fixed_q,
-                user_answer=user_message,
-                status=status,
-            )
-            new_state.last_question = reply
-
-            # เก็บ history: AI probe same step
-            state.history.append({
-                "step": current_step,
-                "event": "ai_probe_question",
-                "fixed_question": fixed_q,
-                "asked_question": reply,
-                "based_on_status": status,
-            })
-
-        elif status == "clear_complete":
-            state.answers_by_step[current_step]["is_completed"] = True
-
-            next_step = current_step + 1
-            next_fixed_q = FIXED_QUESTIONS.get(next_step)
-
-            if next_fixed_q:
-                next_question = await generate_next_step_question(
-                    fixed_question=next_fixed_q,
-                    previous_answer=user_message,
-                )
-                new_state.step = next_step
-                new_state.fixed_question = next_fixed_q
-                new_state.last_question = next_question
-                reply = next_question
-
-                # เก็บ history: move to next step
-                state.history.append({
-                    "step": next_step,
-                    "event": "ai_next_question",
-                    "previous_step": current_step,
-                    "fixed_question": next_fixed_q,
-                    "asked_question": next_question,
-                    "previous_answer": user_message,
-                })
-            else:
-                all_answers = state.answers_by_step
-
-                reply_lines = [
-                    "ขอบคุณมากครับ ตอนนี้เราได้สำรวจประเด็นสำคัญครบแล้ว",
-                    "",
-                    "สรุปคำตอบของคุณ:"
-                ]
-
-                for step_no, item in sorted(all_answers.items()):
-                    fixed_question_item = item.get("fixed_question", "")
-                    user_answer_item = item.get("user_answer", "")
-                    status_item = item.get("status", "")
-
-                    reply_lines.append(
-                        f"\nข้อ {step_no}\n"
-                        f"คำถาม: {fixed_question_item}\n"
-                        f"คำตอบ: {user_answer_item}\n"
-                        f"สถานะ: {status_item}"
-                    )
-
-                reply = "\n".join(reply_lines)
-
-                # เก็บ history: conversation completed
-                state.history.append({
-                    "step": current_step,
-                    "event": "conversation_completed",
-                    "summary_count": len(all_answers),
-                    "final_reply": reply,
-                })
-
-        else:
-            reply = "ขอชวนเล่าเพิ่มเติมอีกนิดนะครับ"
-
-            # เก็บ history: fallback
-            state.history.append({
-                "step": current_step,
-                "event": "fallback_reply",
-                "fixed_question": fixed_q,
-                "asked_question": state.last_question,
-                "user_answer": user_message,
-            })
-
-    return ChatResponse_aicoach(
-        reply=reply,
-        state=new_state,
-        source="learning_entry",
+    item_key = step_key(state.phase, state.step)
+    state.answers_by_step[item_key] = StepAnswer(
+        phase=state.phase,
+        step=state.step,
+        rule_key=key,
+        question=rule.get("question", ""),
+        user_answer=user_message,
+        status=eval_result.get("status", ""),
+        is_completed=bool(eval_result.get("pass")),
+        extracted=eval_result.get("extracted", {}),
     )
+
+
+def advance_state(state: ChatState):
+    next_pos = get_next_position(state)
+    if next_pos is None:
+        state.is_completed = True
+        return None
+
+    next_phase, next_step = next_pos
+    old_phase = state.phase
+
+    state.phase = next_phase
+    state.step = next_step
+    state.retry_count = 0
+
+    return {
+        "old_phase": old_phase,
+        "new_phase": next_phase,
+        "new_step": next_step,
+        "is_phase_transition": old_phase != next_phase,
+    }
+
 
 async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState):
     if state is None:
@@ -237,11 +80,8 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
 
     user_message = (req.user_message or "").strip()
 
-    # map web/member แบบเดียวกับ aicustom ถ้ามี field นี้ใน req/state
-
     if not user_message:
-        reply = "กรุณาพิมพ์สิ่งที่ต้องการพัฒนา / ปัญหาที่อยากแก้"
-
+        reply = "กรุณาพิมพ์เรื่องที่อยากพัฒนา หรือประเด็นที่อยากปรึกษาโค้ชครับ"
         yield {"type": "chunk", "text": reply}
         yield {
             "type": "done",
@@ -249,51 +89,33 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
             "status": "empty_message",
             "reason": "user_message_empty",
             "state": state,
-            "source": "empty_message",
+            "source": "coach_engine_v2",
         }
         return
 
-    # --------------------------------------------------
-    # phase 1 = ถาม topic ข้อมูล user ที่จำเป้นก่อน
-    # --------------------------------------------------
+    if state.is_completed:
+        state = ChatState()
 
+    # start conversation
     if state.phase == 1 and state.step == 0:
-        final_reply =""
-        next_step = 1
+        state.step = 1
+        rule = get_current_rule(state)
+        final_reply = ""
 
-        phase_data = PHASES[1]
-        rules = phase_data["rules"]
-        rule = rules[next_step]
-
-        fixed_q = rule["question"]
-
-        async for item in generate_opening_ai_coach_question_stream(
-            fixed_question=fixed_q,
-            goal=rule["goal"]
-        ):
+        async for item in ask_opening(rule):
             if item["type"] == "chunk":
                 text = item.get("text", "")
                 final_reply += text
                 yield {"type": "chunk", "text": text}
-
             elif item["type"] == "done":
                 final_reply = item.get("content", final_reply)
 
-        new_state = ChatState(
-            phase=1,
-            step=1,
-            last_question=final_reply,
-            answers_by_step=state.answers_by_step,
-            answers=state.answers,
-            history=state.history,
-            retry_count=0,
-        )
-
-        new_state.history.append({
-            "phase": 1,
-            "step": 1,
+        state.last_question = final_reply
+        state.history.append({
+            "phase": state.phase,
+            "step": state.step,
             "role": "assistant",
-            "event": "ask_question",
+            "event": "ask_opening",
             "rule_key": rule["key"],
             "text": final_reply,
         })
@@ -302,158 +124,60 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
             "type": "done",
             "reply": final_reply,
             "status": "ask_first_question",
-            "reason": "phase1_step0_to_step1",
-            "state": new_state,
-            "source": "phase1_rules",
+            "reason": "start_coaching",
+            "state": state,
+            "source": "coach_engine_v2",
         }
         return
-    
-    elif state.phase in PHASES:
 
-        phase_data = PHASES[state.phase]
-        rules = phase_data["rules"]
-        rule = rules[state.step]
+    rule = get_current_rule(state)
 
-        result = await evaluate_answer(
-            rule=rule,
-            user_answer=user_message,
-            state=state
-        )
+    state.history.append({
+        "phase": state.phase,
+        "step": state.step,
+        "role": "user",
+        "event": "user_answer",
+        "rule_key": rule["key"],
+        "question": state.last_question,
+        "text": user_message,
+    })
 
-        # ----------------------
-        # PASS CASE
-        # ----------------------
-        if result["pass"]:
+    eval_result = await evaluate_answer(rule=rule, user_answer=user_message, state=state)
+    analysis = await analyze_coaching_context(rule=rule, user_answer=user_message, eval_result=eval_result, state=state)
+    policy = decide_dialogue_policy(
+        eval_result=eval_result,
+        analysis=analysis,
+        state=state,
+        rule=rule,
+        phase_rules=PHASES[state.phase]["rules"],
+    )
 
-            state.answers[rule["key"]] = user_message
+    update_coaching_memory(state, analysis, policy)
 
-            max_step = max(rules.keys())
+    state.history.append({
+        "phase": state.phase,
+        "step": state.step,
+        "role": "system",
+        "event": "coach_decision",
+        "rule_key": rule["key"],
+        "eval_result": eval_result,
+        "analysis": analysis,
+        "policy": policy,
+    })
 
-            # next step in same phase
-            if state.step < max_step:
+    if policy.get("save_answer"):
+        save_current_answer(state, rule, user_message, eval_result)
 
-                state.step += 1
-                next_rule = rules[state.step]
+    action = policy["action"]
+    final_reply = ""
 
-                final_reply = ""
-
-                async for item in ask(
-                    state=state,
-                    next_rule=next_rule
-                ):
-                    if item["type"] == "chunk":
-                        yield item
-
-                    elif item["type"] == "done":
-                        final_reply = item.get("content", final_reply)
-
-                state.last_question = final_reply
-
-                yield {
-                    "type": "done",
-                    "reply": final_reply,
-                    "status": "next_step",
-                    "reason": "accepted",
-                    "state": state,
-                    "source": "engine"
-                }
-                return
-
-            # ----------------------
-            # NEXT PHASE
-            # ----------------------
-            else:
-                state.phase += 1
-                state.step = 1
-
-                # ถ้ามี phase ต่อไป
-                if state.phase in PHASES:
-
-                    next_phase_data = PHASES[state.phase]
-                    next_rule = next_phase_data["rules"][1]
-
-                    final_reply = ""
-
-                    async for item in ask_phase_transition(
-                        state=state,
-                        next_rule=next_rule,
-                        from_phase=PHASES[state.phase - 1]["title"],
-                        to_phase=PHASES[state.phase]["title"]
-                    ):
-                        if item["type"] == "chunk":
-                            text = item.get("text", "")
-                            final_reply += text
-                            yield {
-                                "type": "chunk",
-                                "text": text
-                            }
-
-                        elif item["type"] == "done":
-                            final_reply = item.get("content", final_reply)
-
-                    state.last_question = final_reply
-
-                    yield {
-                        "type": "done",
-                        "reply": final_reply,
-                        "status": "next_phase",
-                        "reason": "phase advanced",
-                        "state": state,
-                        "source": "engine"
-                    }
-                    return
-
-                # ไม่มี phase ต่อแล้ว
-                # ไม่มี phase ต่อแล้ว = ครบ TGROW แล้ว ให้ AI สรุปผล
-                else:
-                    final_reply = ""
-
-                    async for item in generate_tgrow_final_summary_stream(state):
-                        if item["type"] == "chunk":
-                            text = item.get("text", "")
-                            final_reply += text
-                            yield {
-                                "type": "chunk",
-                                "text": text
-                            }
-
-                        elif item["type"] == "done":
-                            final_reply = item.get("content", final_reply)
-
-                    state.history.append({
-                        "phase": state.phase,
-                        "step": state.step,
-                        "role": "assistant",
-                        "event": "coaching_complete_summary",
-                        "summary": final_reply,
-                    })
-
-                    yield {
-                        "type": "done",
-                        "reply": final_reply,
-                        "status": "coaching_complete",
-                        "reason": "all phases completed",
-                        "state": state,
-                        "source": "engine"
-                    }
-                    return
-
-        # ----------------------
-        # FAIL CASE
-        # ----------------------
+    if action == "redirect_scope":
         state.retry_count += 1
-
-        final_reply = ""
-
-        async for item in ask_followup(
-            state=state,
-            rule=rule,
-            eval_result=result,
-            user_answer=user_message
-        ):
+        async for item in ask_scope_redirect(user_message):
             if item["type"] == "chunk":
-                yield item
-
+                text = item.get("text", "")
+                final_reply += text
+                yield {"type": "chunk", "text": text}
             elif item["type"] == "done":
                 final_reply = item.get("content", final_reply)
 
@@ -462,309 +186,161 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
         yield {
             "type": "done",
             "reply": final_reply,
-            "status": "followup",
-            "reason": result["reason"],
+            "status": "redirect_scope",
+            "reason": policy.get("reason"),
+            "confidence": eval_result.get("confidence"),
             "state": state,
-            "source": "engine"
+            "source": "coach_engine_v2",
         }
         return
 
-        # if result["pass"]:
+    if action == "reframe_scope":
+        state.retry_count += 1
+        async for item in ask_reframe_scope(user_message):
+            if item["type"] == "chunk":
+                text = item.get("text", "")
+                final_reply += text
+                yield {"type": "chunk", "text": text}
+            elif item["type"] == "done":
+                final_reply = item.get("content", final_reply)
 
-        #     state.answers[rule["key"]] = user_message
+        state.last_question = final_reply
 
-        #     if state.step < 6:
-        #         current_step = state.step
-        #         state.step += 1
-        #         next_rule = PHASE1_RULES[state.step]
+        yield {
+            "type": "done",
+            "reply": final_reply,
+            "status": "reframe_scope",
+            "reason": policy.get("reason"),
+            "confidence": eval_result.get("confidence"),
+            "state": state,
+            "source": "coach_engine_v2",
+        }
+        return
 
-        #         yield {
-        #             "type": "done",
-        #             "reply": f"[DEBUG] step {current_step} passed -> next step {state.step}\nnext_question: {next_rule['question']}",
-        #             "status": "next_step",
-        #             "reason": "answer accepted",
-        #             "state": state,
-        #             "source": "phase1_debug",
-        #             "confidence": result.get("confidence"),
-        #         }
-        #         return
+    if action == "clarify_same_step":
+        state.retry_count += 1
+        async for item in ask_clarify_same_step(state, rule, user_message, eval_result):
+            if item["type"] == "chunk":
+                text = item.get("text", "")
+                final_reply += text
+                yield {"type": "chunk", "text": text}
+            elif item["type"] == "done":
+                final_reply = item.get("content", final_reply)
 
-        #     else:
-        #         state.phase = 2
-        #         state.step = 1
+        state.last_question = final_reply
 
-        #         yield {
-        #             "type": "done",
-        #             "reply": "[DEBUG] phase1 completed -> move to phase2",
-        #             "status": "phase_complete",
-        #             "reason": "phase1 completed",
-        #             "state": state,
-        #             "source": "phase1_debug",
-        #             "confidence": result.get("confidence"),
-        #         }
-        #         return
+        yield {
+            "type": "done",
+            "reply": final_reply,
+            "status": "clarify_same_step",
+            "reason": policy.get("reason"),
+            "confidence": eval_result.get("confidence"),
+            "state": state,
+            "source": "coach_engine_v2",
+        }
+        return
 
-        # else:
-        #     state.retry_count += 1
+    if action in {"probe_deeper", "reflect_and_probe"}:
+        state.retry_count += 1
+        async for item in ask_deeper_coaching_question(state, rule, user_message, analysis):
+            if item["type"] == "chunk":
+                text = item.get("text", "")
+                final_reply += text
+                yield {"type": "chunk", "text": text}
+            elif item["type"] == "done":
+                final_reply = item.get("content", final_reply)
 
-        #     yield {
-        #         "type": "done",
-        #         "reply": f"[DEBUG] followup needed\nstatus={result['status']}\nreason={result['reason']}\nretry={state.retry_count}",
-        #         "status": "followup_needed",
-        #         "reason": "answer not sufficient",
-        #         "state": state,
-        #         "source": "phase1_debug",
-        #         "confidence": result.get("confidence"),
-        #     }
-        #     return
+        state.last_question = final_reply
 
+        yield {
+            "type": "done",
+            "reply": final_reply,
+            "status": action,
+            "reason": policy.get("reason"),
+            "confidence": eval_result.get("confidence"),
+            "state": state,
+            "source": "coach_engine_v2",
+        }
+        return
 
-        
-        # --------------------------------------------------
-        # STEP > 0 = รับคำตอบผู้ใช้ + evaluate
-        # --------------------------------------------------
-        # fixed_q = state.fixed_question
-        # current_step = state.step
-        # new_state = state
+    if action in {"ask_next", "summarize_then_next"}:
+        advance_info = advance_state(state)
 
-        # # เก็บ history: user answer
-        # state.history.append({
-        #     "step": current_step,
-        #     "event": "user_answer",
-        #     "fixed_question": fixed_q,
-        #     "asked_question": state.last_question,
-        #     "user_answer": user_message,
-        # })
+        if state.is_completed:
+            async for item in ask_final_summary(state):
+                if item["type"] == "chunk":
+                    text = item.get("text", "")
+                    final_reply += text
+                    yield {"type": "chunk", "text": text}
+                elif item["type"] == "done":
+                    final_reply = item.get("content", final_reply)
 
-        # check = await evaluate_user_answer(
-        #     question=fixed_q,
-        #     user_answer=user_message,
-        # )
+            state.last_question = final_reply
+            state.history.append({
+                "role": "assistant",
+                "event": "final_summary",
+                "text": final_reply,
+            })
 
-        # status = check.get("status", "off_topic")
-        # reason = check.get("reason", "")
-        # confidence = check.get("confidence", 0.0)
+            yield {
+                "type": "done",
+                "reply": final_reply,
+                "status": "coaching_complete",
+                "reason": "all_phases_completed",
+                "confidence": eval_result.get("confidence"),
+                "state": state,
+                "source": "coach_engine_v2",
+            }
+            return
 
-        # # เก็บ history: evaluation result
-        # state.history.append({
-        #     "step": current_step,
-        #     "event": "evaluation",
-        #     "fixed_question": fixed_q,
-        #     "asked_question": state.last_question,
-        #     "user_answer": user_message,
-        #     "status": status,
-        #     "reason": reason,
-        #     "confidence": confidence,
-        #     "raw": check.get("raw", ""),
-        # })
+        next_rule = get_current_rule(state)
 
-        # if current_step not in state.answers_by_step:
-        #     state.answers_by_step[current_step] = {
-        #         "fixed_question": fixed_q,
-        #         "asked_question": state.last_question,
-        #         "user_answer": "",
-        #         "status": "",
-        #         "reason": "",
-        #         "confidence": 0.0,
-        #         "is_completed": False,
-        #     }
+        if advance_info and advance_info["is_phase_transition"]:
+            from_phase = PHASES[advance_info["old_phase"]]["title"]
+            to_phase = PHASES[state.phase]["title"]
+            stream = ask_phase_transition(state, from_phase, to_phase, next_rule)
+            status = "next_phase"
+        else:
+            stream = ask_next_question(state, next_rule)
+            status = "next_step"
 
-        # state.answers_by_step[current_step]["fixed_question"] = fixed_q
-        # state.answers_by_step[current_step]["asked_question"] = state.last_question
-        # state.answers_by_step[current_step]["user_answer"] = user_message
-        # state.answers_by_step[current_step]["status"] = status
-        # state.answers_by_step[current_step]["reason"] = reason
-        # state.answers_by_step[current_step]["confidence"] = confidence
+        async for item in stream:
+            if item["type"] == "chunk":
+                text = item.get("text", "")
+                final_reply += text
+                yield {"type": "chunk", "text": text}
+            elif item["type"] == "done":
+                final_reply = item.get("content", final_reply)
 
-        # new_state = state
+        state.last_question = final_reply
+        state.history.append({
+            "phase": state.phase,
+            "step": state.step,
+            "role": "assistant",
+            "event": status,
+            "rule_key": next_rule["key"],
+            "text": final_reply,
+        })
 
-        # # --------------------------------------------------
-        # # 1) off_topic / too_short -> retry same step
-        # # --------------------------------------------------
-        # if status in {"off_topic", "too_short"}:
-        #     final_reply = ""
-        #     async for item in generate_retry_same_step_question_stream(
-        #         fixed_question=fixed_q,
-        #         user_answer=user_message,
-        #         status=status,
-        #     ):
-        #         if item["type"] == "chunk":
-        #             text = item.get("text", "")
-        #             final_reply += text
-        #             yield {"type": "chunk", "text": text}
-        #         elif item["type"] == "done":
-        #             final_reply = item.get("content", final_reply)
+        yield {
+            "type": "done",
+            "reply": final_reply,
+            "status": status,
+            "reason": policy.get("reason"),
+            "confidence": eval_result.get("confidence"),
+            "state": state,
+            "source": "coach_engine_v2",
+        }
+        return
 
-        #     new_state.last_question = final_reply
-
-        #     state.history.append({
-        #         "step": current_step,
-        #         "event": "ai_retry_question",
-        #         "fixed_question": fixed_q,
-        #         "asked_question": final_reply,
-        #         "based_on_status": status,
-        #     })
-
-        #     yield {
-        #         "type": "done",
-        #         "reply": final_reply,
-        #         "status": status,
-        #         "reason": reason or "retry_same_step",
-        #         "confidence": confidence,
-        #         "state": new_state,
-        #         "source": "learning_entry",
-        #     }
-        #     return
-
-        # # --------------------------------------------------
-        # # 2) partial / reflecting / clear_but_needs_guidance -> probe
-        # # --------------------------------------------------
-        # elif status in {"partial", "reflecting", "clear_but_needs_guidance"}:
-        #     if status == "clear_but_needs_guidance":
-        #         state.answers_by_step[current_step]["is_completed"] = True
-
-        #     final_reply = ""
-        #     async for item in generate_probe_same_step_question_stream(
-        #         fixed_question=fixed_q,
-        #         user_answer=user_message,
-        #         status=status,
-        #     ):
-        #         if item["type"] == "chunk":
-        #             text = item.get("text", "")
-        #             final_reply += text
-        #             yield {"type": "chunk", "text": text}
-        #         elif item["type"] == "done":
-        #             final_reply = item.get("content", final_reply)
-
-        #     new_state.last_question = final_reply
-
-        #     state.history.append({
-        #         "step": current_step,
-        #         "event": "ai_probe_question",
-        #         "fixed_question": fixed_q,
-        #         "asked_question": final_reply,
-        #         "based_on_status": status,
-        #     })
-
-        #     yield {
-        #         "type": "done",
-        #         "reply": final_reply,
-        #         "status": status,
-        #         "reason": reason or "probe_same_step",
-        #         "confidence": confidence,
-        #         "state": new_state,
-        #         "source": "learning_entry",
-        #     }
-        #     return
-
-        # # --------------------------------------------------
-        # # 3) clear_complete -> next step or final summary
-        # # --------------------------------------------------
-        # elif status == "clear_complete":
-        #     state.answers_by_step[current_step]["is_completed"] = True
-
-        #     next_step = current_step + 1
-        #     next_fixed_q = FIXED_QUESTIONS.get(next_step)
-
-        #     if next_fixed_q:
-        #         final_reply = ""
-        #         async for item in generate_next_step_question_stream(
-        #             fixed_question=next_fixed_q,
-        #             previous_answer=user_message,
-        #         ):
-        #             if item["type"] == "chunk":
-        #                 text = item.get("text", "")
-        #                 final_reply += text
-        #                 yield {"type": "chunk", "text": text}
-        #             elif item["type"] == "done":
-        #                 final_reply = item.get("content", final_reply)
-
-        #         new_state.step = next_step
-        #         new_state.fixed_question = next_fixed_q
-        #         new_state.last_question = final_reply
-
-        #         state.history.append({
-        #             "step": next_step,
-        #             "event": "ai_next_question",
-        #             "previous_step": current_step,
-        #             "fixed_question": next_fixed_q,
-        #             "asked_question": final_reply,
-        #             "previous_answer": user_message,
-        #         })
-
-        #         yield {
-        #             "type": "done",
-        #             "reply": final_reply,
-        #             "status": "next_step",
-        #             "reason": "clear_complete",
-        #             "confidence": confidence,
-        #             "state": new_state,
-        #             "source": "learning_entry",
-        #         }
-        #         return
-
-        #     # ครบทุกข้อแล้ว
-        #     all_answers = state.answers_by_step
-
-        #     reply_lines = [
-        #         "ขอบคุณมากครับ ตอนนี้เราได้สำรวจประเด็นสำคัญครบแล้ว",
-        #         "",
-        #         "สรุปคำตอบของคุณ:"
-        #     ]
-
-        #     for step_no, item in sorted(all_answers.items()):
-        #         fixed_question_item = item.get("fixed_question", "")
-        #         user_answer_item = item.get("user_answer", "")
-        #         status_item = item.get("status", "")
-
-        #         reply_lines.append(
-        #             f"\nข้อ {step_no}\n"
-        #             f"คำถาม: {fixed_question_item}\n"
-        #             f"คำตอบ: {user_answer_item}\n"
-        #             f"สถานะ: {status_item}"
-        #         )
-
-        #     final_reply = "\n".join(reply_lines)
-
-        #     state.history.append({
-        #         "step": current_step,
-        #         "event": "conversation_completed",
-        #         "summary_count": len(all_answers),
-        #         "final_reply": final_reply,
-        #     })
-
-        #     yield {"type": "chunk", "text": final_reply}
-        #     yield {
-        #         "type": "done",
-        #         "reply": final_reply,
-        #         "status": "completed",
-        #         "reason": "all_steps_completed",
-        #         "confidence": confidence,
-        #         "state": new_state,
-        #         "source": "learning_entry",
-        #     }
-        #     return
-
-        # # --------------------------------------------------
-        # # 4) fallback
-        # # --------------------------------------------------
-        # final_reply = "ขอชวนเล่าเพิ่มเติมอีกนิดนะครับ"
-
-        # state.history.append({
-        #     "step": current_step,
-        #     "event": "fallback_reply",
-        #     "fixed_question": fixed_q,
-        #     "asked_question": state.last_question,
-        #     "user_answer": user_message,
-        # })
-
-        # yield {"type": "chunk", "text": final_reply}
-        # yield {
-        #     "type": "done",
-        #     "reply": final_reply,
-        #     "status": "fallback",
-        #     "reason": reason or "unknown_status",
-        #     "confidence": confidence,
-        #     "state": new_state,
-        #     "source": "learning_entry",
-        # }
+    fallback = "ผมขอชวนคุณเล่าเพิ่มอีกนิดนะครับ เพื่อให้เราเห็นประเด็นนี้ชัดขึ้น"
+    state.last_question = fallback
+    yield {"type": "chunk", "text": fallback}
+    yield {
+        "type": "done",
+        "reply": fallback,
+        "status": "fallback",
+        "reason": "unknown_policy_action",
+        "state": state,
+        "source": "coach_engine_v2",
+    }

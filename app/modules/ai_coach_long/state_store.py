@@ -1,9 +1,8 @@
 from app.modules.ai_coach.schema import ChatState
 
-
 class ChatStateStore:
     def __init__(self):
-        self._store: dict[str, ChatState] = {}
+        self._store = {}
 
     def _make_key(self, web_no: int | None, member_no: int | None) -> str:
         web_no = web_no or 0
@@ -22,6 +21,5 @@ class ChatStateStore:
         key = self._make_key(web_no, member_no)
         self._store[key] = ChatState()
         return self._store[key]
-
 
 chat_state_store_aicoach = ChatStateStore()
