@@ -3,7 +3,6 @@ from app.modules.ai_assis.service import (
     detect_intent,
     handle_company_profile,
     handle_credibility,
-    handle_quotation,
     handle_contact,
     handle_irrelevant,
     handle_general_qa,
@@ -13,6 +12,7 @@ from app.modules.ai_assis.handler.course_handler import (
 handle_course_search
 )
 from app.modules.ai_assis.handler.instructor_handler import handle_instructor_search
+from app.modules.ai_assis.handler.quotation_handler import handle_quotation
 
 from app.modules.ai_assis.qdrant_service import search_courses_from_qdrant, check_topic_exists_in_qdrant
 import json

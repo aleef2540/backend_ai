@@ -1638,7 +1638,7 @@ async def handle_company_profile(req, state):
     company_context = await fetch_company_profile_context()
 
     state.company_context = {
-        "source_url": "https://www.entraining.net/about.php",
+        "source_url": "https://entstaffs.entraining.net/api/about/about.php",
         "content": company_context,
     }
 
@@ -1878,6 +1878,15 @@ async def handle_contact(req, state):
 
     system_prompt = """
 คุณคือ AI Assistant ของเว็บไซต์บริษัทฝึกอบรม
+ติดต่อเรา
+บริษัท เอ็นมาร์ก โซลูชั่น จำกัด (สถาบันฝึกอบรมเอ็นเทรนนิ่ง)
+112 ซ.รามคำแหง 30/1 ถ.รามคำแหง แขวงหัวหมาก เขตบางกะปิ กรุงเทพฯ 10240
+โทรศัพท์: 0-2374-8638
+Hotline : 084-164-2057 / 093-649-3561
+แฟกซ์ : 0-2375-2347
+เจ้าหน้าที่ Public(ส่งคนออกมาร่วมอบรม) : 099-0764277 วา(ซัซวาย์) / 097-090-6448 (สุนิศา)
+Website : www.entraining.net
+E-mail : asst.entraining@gmail.com, cocoachentraining@gmail.com
 
 หน้าที่:
 - ตอบคำถามเกี่ยวกับช่องทางติดต่อของบริษัท
