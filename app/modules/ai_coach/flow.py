@@ -1,8 +1,7 @@
 from app.modules.ai_coach.schema import ChatRequest_aicoach, ChatState, StepAnswer
 from app.modules.ai_coach.constants import PHASES
 from app.modules.ai_coach.service import (
-    evaluate_answer,
-    analyze_coaching_context,
+    classify_coaching_turn,
     decide_dialogue_policy,
     update_coaching_memory,
     step_key,
@@ -142,8 +141,17 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
         "text": user_message,
     })
 
-    eval_result = await evaluate_answer(rule=rule, user_answer=user_message, state=state)
-    analysis = await analyze_coaching_context(rule=rule, user_answer=user_message, eval_result=eval_result, state=state)
+    classification = await classify_coaching_turn(
+        rule=rule,
+        user_answer=user_message,
+        state=state,
+    )
+    eval_result = classification["eval_result"]
+    analysis = classification["analysis"]
+
+    # print(f"eval_result", eval_result,flush=True)
+    # print(f"analysis", analysis,flush=True)
+
     policy = decide_dialogue_policy(
         eval_result=eval_result,
         analysis=analysis,
@@ -151,7 +159,7 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
         rule=rule,
         phase_rules=PHASES[state.phase]["rules"],
     )
-
+    print(f"policy", policy,flush=True)
     update_coaching_memory(state, analysis, policy)
 
     state.history.append({
@@ -301,6 +309,7 @@ async def process_chat_aicoach_stream(req: ChatRequest_aicoach, state: ChatState
             stream = ask_phase_transition(state, from_phase, to_phase, next_rule)
             status = "next_phase"
         else:
+            print(f"next_rule = ", next_rule,flush=True)
             stream = ask_next_question(state, next_rule)
             status = "next_step"
 

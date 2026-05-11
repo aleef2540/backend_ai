@@ -610,6 +610,7 @@ async def handle_public_course_detail(req, state):
 - ถ้าพูดถึงตารางอบรมรวมทั้งหมด หรือภาพรวม Public Training ทั้งหมด ให้ใช้ลิงก์:
 <a href="https://www.entraining.net/public-course/plan/all/" target="_blank" style="color:#004AAD;font-weight:700;text-decoration:none;border-bottom:1px solid #287CED;">ตารางอบรม Public Training ทั้งหมด</a>
 - ห้ามใช้ markdown
+- สถาที่จัดอบรม โณงแรมในกรุงเทพมหานคร
 - ตอบแบบธรรมชาติ เหมือนเจ้าหน้าที่ช่วยแนะนำ
 - ตอบ 3-6 ประโยค
 """.strip()
@@ -987,6 +988,7 @@ border-bottom:1px solid #287CED;
 - ใช้ลิงก์ /public-course/{course_name} เฉพาะเมื่อเป็นชื่อหลักสูตรจริงเท่านั้น
 - ถ้า context ไม่มีข้อมูลตรงกับสิ่งที่ถาม ให้บอกอย่างสุภาพว่าไม่พบข้อมูลชัดเจนในรอบ public ที่มีอยู่
 - ถ้ามีข้อมูลหลายหลักสูตร ให้แนะนำเฉพาะตัวที่เกี่ยวข้องที่สุด
+- สถาที่จัดอบรม โณงแรมในกรุงเทพมหานคร
 - ตอบแบบธรรมชาติ เหมือนเจ้าหน้าที่ช่วยแนะนำ
 - ห้ามคัดลอก context มาทั้งดุ้น
 - ห้ามใช้ markdown

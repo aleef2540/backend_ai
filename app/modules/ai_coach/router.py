@@ -88,8 +88,8 @@ async def start_ai_coach_stream(req: ChatRequest_aicoach):
     state = ChatState(phase=1, step=0)
     chat_state_store_aicoach.set_state(req.web_no, req.member_no, state)
 
-    print(f"[ROUTE] /start/ai-coach START {time.time():.3f}", flush=True)
-    print_state("BEFORE STATE", state)
+    # print(f"[ROUTE] /start/ai-coach START {time.time():.3f}", flush=True)
+    # print_state("BEFORE STATE", state)
 
     return StreamingResponse(
         stream_response(req, state),
@@ -109,8 +109,8 @@ async def chat_ai_coach_stream(req: ChatRequest_aicoach):
 
     state = req.state or chat_state_store_aicoach.get_state(req.web_no, req.member_no)
 
-    print(f"[ROUTE] /chat/ai-coach START {time.time():.3f}", flush=True)
-    print_state("BEFORE STATE", state)
+    # print(f"[ROUTE] /chat/ai-coach START {time.time():.3f}", flush=True)
+    # print_state("BEFORE STATE", state)
 
     return StreamingResponse(
         stream_response(req, state),

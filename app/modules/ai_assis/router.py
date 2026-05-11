@@ -25,6 +25,7 @@ async def chat_ai_sale_stream(req: AISaleRequest):
 
     state = ai_sale_state_store.get_state(req.chat_id)
     print("✅ USE STATE FROM STORE", flush=True)
+    print("user_message = ",req.user_message, flush=True)
 
     # print("STATE BEFORE =", state.model_dump(), flush=True)
 
