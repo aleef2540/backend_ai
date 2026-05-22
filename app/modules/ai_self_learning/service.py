@@ -1,31 +1,55 @@
-def insert_chat_history_aiselflearning(
-    conn,
+import json
+from app.core.database import run_query_bridge
+
+
+def insert_ai_sale_chat_log_bridge(
+    *,
     chat_id: str,
-    course_no: int,
     user_message: str,
     ai_reply: str,
-    ai_status: str,
-    ai_reason: str,
+    state,
+    status: str = "",
+    reason: str = "",
+    source: str = "",
 ):
-    cur = conn.cursor()
-
-    cur.execute("""
-        INSERT INTO ai_self_learning_chat_history (
-            chat_id,
-            OCourse_no,
-            user_message,
-            ai_reply,
-            ai_status,
-            ai_reason
-        ) VALUES (%s, %s, %s, %s, %s, %s)
-    """, (
+    sql = """
+    INSERT INTO ai_sale_chat_log
+    (
         chat_id,
-        course_no,
+        web_no,
+        member_no,
+        from_web,
         user_message,
         ai_reply,
-        ai_status,
-        ai_reason,
-    ))
+        matched_course_id,
+        mode,
+        status,
+        reason,
+        requirements,
+        recommended_courses,
+        search_query,
+        source,
+        created_at
+    )
+    VALUES
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    """
 
-    conn.commit()
-    cur.close()
+    params = [
+        chat_id,
+        "test",
+        "test",
+        "test",
+        user_message,
+        ai_reply,
+        "test",
+        "test",
+        status or "",
+        reason or "",
+        "test",
+        "test",
+        "test",
+        source or "",
+    ]
+
+    return run_query_bridge(sql, params)

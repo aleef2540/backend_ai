@@ -9,9 +9,10 @@ from app.utils.debug_state import print_debug, print_state
 from app.modules.ai_self_learning.schema import ChatRequest_aiselflearning
 from app.modules.ai_self_learning.state_store import chat_state_store_aiselflearning
 from app.modules.ai_self_learning.flow import process_chat_aiselflearning_stream
+# from app.modules.ai_assis.log_bridge import insert_ai_sale_chat_log_bridge
 
 # ⚠️ ตัวนี้เดี๋ยวต้องย้าย/สร้างทีหลัง
-from app.modules.ai_self_learning.service import insert_chat_history_aiselflearning
+from app.modules.ai_self_learning.service import insert_ai_sale_chat_log_bridge
 
 router = APIRouter(tags=["AI Self Learning"])
 
@@ -64,15 +65,18 @@ async def chat_ai_self_learning_stream(req: ChatRequest_aiselflearning):
                     final_reason = item.get("reason", "")
                     final_state = item.get("state", final_state)
 
-                    # insert_chat_history_aiselflearning(
-                    #     conn=conn_mysql,
-                    #     chat_id=req.chat_id,
-                    #     course_no=req.OCourse_no,
-                    #     user_message=req.user_message,
-                    #     ai_reply=final_reply,
-                    #     ai_status=final_status,
-                    #     ai_reason=final_reason,
-                    # )
+                    # ✅ บันทึก log ลง DB ผ่าน PHP bridge
+                    log_result = insert_ai_sale_chat_log_bridge(
+                        chat_id=req.chat_id,
+                        user_message=req.user_message,
+                        ai_reply=final_reply,
+                        state=final_state,
+                        status=item.get("status", ""),
+                        reason=item.get("reason", ""),
+                        source=final_source,
+                    )
+
+                    print("✅ AI SALE LOG RESULT =", log_result, flush=True)
 
                     chat_state_store_aiselflearning.set_state(req.chat_id, final_state)
 
