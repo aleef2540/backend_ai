@@ -534,7 +534,7 @@ async def handle_public_course_detail(req, state):
         state.course_context["last_public_course"] = matched_course
 
     if not matched_course:
-        reply = "อยากทราบรายละเอียดของหลักสูตรไหนครับ รบกวนพิมพ์ชื่อหลักสูตร หรือบอกหัวข้อที่สนใจเพิ่มเติมได้เลยครับ"
+        reply = "ยังไม่มีหลักสูตร Public ที่คุณสนใจครับ หากต้องการสอบถามเพิ่มเติมสามารถติดต่อพันกงานได้เลยครับ"
 
         state.mode = "public_course_detail"
         state.last_answer = reply

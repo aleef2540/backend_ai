@@ -62,7 +62,7 @@ async def chat_ai_sale_stream(req: AISaleRequest):
                     final_source = item.get("source", final_source)
 
                     print("✅ STREAM DONE", flush=True)
-                    # print("FINAL STATE =", final_state.model_dump(), flush=True)
+                    print("FINAL REPLY =", final_reply, flush=True)
 
                     ai_sale_state_store.set_state(
                         req.chat_id,
