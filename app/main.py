@@ -9,6 +9,7 @@ from app.modules.ai_self_learning.router import router as ai_self_learning_route
 from app.modules.ai_coach.router import router as ai_coach_router
 from app.modules.ai_sale.router import router as ai_sale_router
 from app.modules.ai_assis.router import router as ai_assis
+from app.modules.ai_expert.router import router as ai_expert
 
 
 app = FastAPI(title="Entraining Chat API")
@@ -37,3 +38,4 @@ app.include_router(ai_self_learning_router)
 app.include_router(ai_coach_router)
 app.include_router(ai_sale_router)
 app.include_router(ai_assis)
+app.include_router(ai_expert)
