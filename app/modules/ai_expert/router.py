@@ -6,7 +6,7 @@ import json
 import time
 
 from app.modules.ai_expert.schema import ChatRequest_aiexpert, ChatResponse_aiexpert, ChatState_aiexpert
-from app.modules.ai_expert.state_store import chat_state_store_aicustom
+from app.modules.ai_expert.state_store import chat_state_store_aiexpert
 from app.modules.ai_expert.flow import process_chat_aiexpert_stream
 
 router = APIRouter(tags=["AI Expert"])
@@ -45,13 +45,13 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
         raise HTTPException(status_code=400, detail="user_message is required")
 
     req.user_message = req.user_message.strip()
-
+    print(req.state)
     # ถ้า PHP ส่ง state มา ใช้ state จาก DB เป็นหลัก
     # ถ้าไม่ได้ส่งมา ค่อย fallback memory ด้วย room_id
     if req.state is not None:
         state = req.state
     else:
-        state = chat_state_store_aicustom.get_state(req.room_id)
+        state = chat_state_store_aiexpert.get_state(req.room_id)
 
     if state is None:
         state = ChatState_aiexpert()
@@ -103,7 +103,7 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
 
                     # fallback memory เท่านั้น
                     # source of truth จริงควรเป็น PHP/MySQL
-                    chat_state_store_aicustom.set_state(
+                    chat_state_store_aiexpert.set_state(
                         req.room_id,
                         final_state
                     )
@@ -157,7 +157,7 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
 
 @router.post("/chat/reset/ai-expert")
 async def reset_chat_ai_expert(payload: ChatRequest_aiexpert):
-    state = chat_state_store_aicustom.reset_state(payload.room_id)
+    state = chat_state_store_aiexpert.reset_state(payload.room_id)
 
     return {
         "status": "ok",

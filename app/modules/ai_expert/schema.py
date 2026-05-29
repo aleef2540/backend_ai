@@ -10,36 +10,12 @@ class ChatState_aiexpert(BaseModel):
     mode: str = "idle"
     intent: str = "unknown"
 
-    topic: str = "unknown"
-    active_course_no: Optional[int] = None
-
-    journey_name: Optional[str] = None
-
     last_intent: str = "unknown"
     last_answer_type: Optional[str] = None
     last_user_message: Optional[str] = None
     last_answer: Optional[str] = None
 
-    requirements: dict = Field(default_factory=dict)
-    missing_requirements: list = Field(default_factory=list)
-    requirement_ready: bool = False
     conversation_history: list = Field(default_factory=list)
-    search_query: Optional[str] = None
-    matched_rag_results: list = Field(default_factory=list)
-
-    allowed_course_data: list = Field(default_factory=list)
-    allowed_course_name_context: Optional[str] = None
-
-        # Learning / Feedback phase
-    learning_phase: dict = Field(default_factory=dict)
-    feedback_status: Optional[str] = None
-
-    @field_validator("requirements", "learning_phase", mode="before")
-    @classmethod
-    def normalize_dict_fields(cls, v):
-        if v in [None, "", []]:
-            return {}
-        return v
 
 class ChatRequest_aiexpert(BaseModel):
     room_id: Optional[int] = None

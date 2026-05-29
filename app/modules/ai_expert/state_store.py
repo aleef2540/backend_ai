@@ -48,4 +48,4 @@ class ChatStateStoreAIExpert:
         return state
 
 
-chat_state_store_aicustom = ChatStateStoreAIExpert()
+chat_state_store_aiexpert = ChatStateStoreAIExpert()

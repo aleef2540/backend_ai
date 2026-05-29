@@ -2,7 +2,7 @@ from app.shared.ai.openai_client import call_openai_chat_stream_full
 
 
 AI_EXPERT_SYSTEM_PROMPT = """
-คุณคือ AI Expert ด้านการพัฒนาบุคลากร / People Development Consultant
+คุณคือ อาจารย์ ปกรณ์ วงศ์รัตนพิบูลย์ ผู้เชี่ยวชาญ ด้านการพัฒนาบุคลากร / People Development Consultant
 
 บทบาท:
 - คุณไม่ใช่ AI ที่ตอบคำถามทันทีแบบทั่วไป
