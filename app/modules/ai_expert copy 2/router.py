@@ -1,4 +1,4 @@
-# app/modules/ai_expert/router.py
+# app/modules/ai_custom/router.py
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -10,7 +10,6 @@ from app.modules.ai_expert.state_store import chat_state_store_aiexpert
 from app.modules.ai_expert.flow import process_chat_aiexpert_stream
 
 router = APIRouter(tags=["AI Expert"])
-
 
 def dump_state_aiexpert(state):
     if state is None:
@@ -27,26 +26,26 @@ def dump_state_aiexpert(state):
 
     return None
 
-
 @router.post("/chat/ai-expert")
 async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
     print("[ROUTE BODY]", {
-        "room_id": req.room_id,
-        "web_no": req.web_no,
-        "member_no": req.member_no,
-        "course_use": req.course_use,
-        "user_message": req.user_message,
-        "has_req_state": req.state is not None,
+    "room_id": req.room_id,
+    "web_no": req.web_no,
+    "member_no": req.member_no,
+    "course_use": req.course_use,
+    "user_message": req.user_message,
+    "has_req_state": req.state is not None,
     }, flush=True)
-
+    
     if not req.room_id:
         raise HTTPException(status_code=400, detail="room_id is required")
 
+    
     if not req.user_message or not req.user_message.strip():
         raise HTTPException(status_code=400, detail="user_message is required")
 
     req.user_message = req.user_message.strip()
-
+    print(req.state)
     # ถ้า PHP ส่ง state มา ใช้ state จาก DB เป็นหลัก
     # ถ้าไม่ได้ส่งมา ค่อย fallback memory ด้วย room_id
     if req.state is not None:
@@ -61,9 +60,9 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
     state.member_no = int(req.member_no) if req.member_no not in [None, ""] else None
 
     state.course_use = [
-        str(x).strip()
-        for x in (req.course_use or [])
-        if str(x).strip()
+    str(x).strip()
+    for x in (req.course_use or [])
+    if str(x).strip()
     ]
 
     print(f"[ROUTE] /chat/ai-expert START room_id={req.room_id} {time.time():.3f}", flush=True)
@@ -72,7 +71,7 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
         stream_start = time.time()
         final_reply = ""
         final_state = state
-        final_source = "ai_expert"
+        final_source = "ai_custom"
         final_active_video = None
         final_status = None
         final_reason = None
@@ -88,10 +87,11 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
                     final_reply += text
 
                     payload = {
-                        "type": "chunk",
-                        "text": text,
+                        'type': 'chunk',
+                        'text': text
                     }
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    json_data = json.dumps(payload, ensure_ascii=False)
+                    yield f"data: {json_data}\n\n"
 
                 elif item_type == "done":
                     final_reply = item.get("reply", final_reply)
@@ -105,7 +105,7 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
                     # source of truth จริงควรเป็น PHP/MySQL
                     chat_state_store_aiexpert.set_state(
                         req.room_id,
-                        final_state,
+                        final_state
                     )
 
                     payload = {
@@ -125,11 +125,15 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
         except Exception as e:
             print(f"[STREAM] EXCEPTION {repr(e)}", flush=True)
 
+            # 1. เตรียมข้อมูล Dict
             payload = {
-                "type": "error",
-                "message": str(e),
+                'type': 'error',
+                'message': str(e)
             }
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            # 2. แปลงเป็น JSON String
+            json_data = json.dumps(payload, ensure_ascii=False)
+            # 3. ส่งข้อมูล (Yield)
+            yield f"data: {json_data}\n\n"
 
         finally:
             print(
@@ -137,7 +141,7 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
                 f"total_chunks={chunk_count} "
                 f"total_reply_len={len(final_reply)} "
                 f"total_time={time.time() - stream_start:.3f}s",
-                flush=True,
+                flush=True
             )
 
     return StreamingResponse(
@@ -153,15 +157,10 @@ async def chat_ai_expert_stream(req: ChatRequest_aiexpert):
 
 @router.post("/chat/reset/ai-expert")
 async def reset_chat_ai_expert(payload: ChatRequest_aiexpert):
-    state = chat_state_store_aiexpert.reset_state(
-        payload.room_id,
-        web_no=payload.web_no,
-        member_no=payload.member_no,
-        course_use=payload.course_use,
-    )
+    state = chat_state_store_aiexpert.reset_state(payload.room_id)
 
     return {
         "status": "ok",
         "room_id": payload.room_id,
-        "state": state.model_dump() if hasattr(state, "model_dump") else state.dict(),
+        "state": state.model_dump(),
     }
